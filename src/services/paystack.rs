@@ -55,6 +55,26 @@ struct PaystackData {
     bin: Option<String>,
 }
 
+/// Resolved bank account details from Paystack
+#[derive(Debug, Clone)]
+pub struct ResolvedBankAccount {
+    pub account_name: String,
+    pub account_number: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ResolveBankData {
+    account_name: String,
+    account_number: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ResolveBankResponse {
+    status: bool,
+    message: String,
+    data: Option<ResolveBankData>,
+}
+
 /// Client for Paystack payment tokenization (AC-03)
 /// CRITICAL: Never stores raw payment data
 pub struct PaystackClient {
@@ -265,6 +285,54 @@ impl PaystackClient {
                 tracing::warn!("Paystack API request failed: {}. Using mock token for development.", e);
                 Ok(format!("BANK_AUTH_mock_{}", Uuid::new_v4()))
             }
+        }
+    }
+
+    /// Resolve a bank account number via Paystack (AC-04)
+    /// Returns the account holder name for display and confirmation.
+    pub async fn resolve_bank_account(
+        &self,
+        account_number: &str,
+        bank_code: &str,
+    ) -> Result<ResolvedBankAccount, PaystackError> {
+        if cfg!(test) || self.secret_key.starts_with("sk_test_") || self.secret_key == "sk_test_dummy" {
+            tracing::info!("[MOCK] Resolving bank account {}/{}", account_number, bank_code);
+            return Ok(ResolvedBankAccount {
+                account_name: "MOCK ACCOUNT HOLDER".to_string(),
+                account_number: account_number.to_string(),
+            });
+        }
+
+        let url = format!(
+            "{}/bank/resolve?account_number={}&bank_code={}",
+            self.base_url, account_number, bank_code
+        );
+
+        let resp = self
+            .client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.secret_key))
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            return Err(PaystackError::TokenizationFailed(format!(
+                "HTTP {}",
+                resp.status()
+            )));
+        }
+
+        let parsed: ResolveBankResponse = resp.json().await?;
+        if parsed.status {
+            let data = parsed.data.ok_or_else(|| {
+                PaystackError::TokenizationFailed("Empty data in resolve response".to_string())
+            })?;
+            Ok(ResolvedBankAccount {
+                account_name: data.account_name,
+                account_number: data.account_number,
+            })
+        } else {
+            Err(PaystackError::TokenizationFailed(parsed.message))
         }
     }
 }

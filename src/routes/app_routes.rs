@@ -11,12 +11,13 @@ use tower_http::{
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
-use crate::handlers::{auth, health, hospitals, registration};
+use crate::handlers::{auth, health, hospitals, registration, clinician_registration};
 use crate::repositories::{
     audit::AuditRepository,
     billing::BillingRepository,
     hospital::HospitalRepository,
     location::LocationRepository,
+    clinician::ClinicianRepository,
 };
 use crate::services::{
     audit_service::AuditService,
@@ -27,6 +28,8 @@ use crate::services::{
     payment_service::PaymentService,
     paystack::PaystackClient,
     registration_service::RegistrationService,
+    sms_service::SmsService,
+    clinician_registration_service::ClinicianRegistrationService,
 };
 
 /// Shared application state
@@ -34,6 +37,7 @@ use crate::services::{
 pub struct AppState {
     pub pool: PgPool,
     pub registration_service: Arc<RegistrationService>,
+    pub clinician_registration_service: Arc<ClinicianRegistrationService>,
 }
 
 /// API Documentation
@@ -94,6 +98,7 @@ pub fn create_router(pool: PgPool) -> Router {
     let location_repo = Arc::new(LocationRepository::new(pool.clone()));
     let billing_repo = Arc::new(BillingRepository::new(pool.clone()));
     let audit_repo = Arc::new(AuditRepository::new(pool.clone()));
+    let clinician_repo = Arc::new(ClinicianRepository::new(pool.clone()));
 
     // Initialize external services
     let geocoding_client = Arc::new(GeocodingClient::new(
@@ -122,9 +127,9 @@ pub fn create_router(pool: PgPool) -> Router {
     ));
 
     let payment_service = Arc::new(PaymentService::new(
-        paystack_client,
+        paystack_client.clone(),
         billing_repo.clone(),
-        encryption_service,
+        encryption_service.clone(),
     ));
 
     let audit_service = Arc::new(AuditService::new(audit_repo));
@@ -141,10 +146,25 @@ pub fn create_router(pool: PgPool) -> Router {
         pool.clone(),
     ));
 
+    // Initialize clinician registration service
+    let sms_service = Arc::new(SmsService::new(
+        std::env::var("TERMII_API_KEY").unwrap_or_else(|_| "mock".to_string()),
+        std::env::var("TERMII_API_URL").ok(),
+    ));
+
+    let clinician_registration_service = Arc::new(ClinicianRegistrationService::new(
+        clinician_repo,
+        sms_service,
+        paystack_client.clone(),
+        encryption_service.clone(),
+        pool.clone(),
+    ));
+
     // Create shared state
     let state = AppState {
         pool: pool.clone(),
         registration_service,
+        clinician_registration_service,
     };
 
     Router::new()
@@ -182,6 +202,23 @@ pub fn create_router(pool: PgPool) -> Router {
         .route(
             "/api/v1/hospitals/:id/advance-step",
             patch(hospitals::advance_registration_step),
+        )
+        // Clinician registration
+        .route(
+            "/api/v1/clinicians/otp/send",
+            post(clinician_registration::send_otp),
+        )
+        .route(
+            "/api/v1/clinicians/otp/verify",
+            post(clinician_registration::verify_otp),
+        )
+        .route(
+            "/api/v1/clinicians/:clinician_id/profile",
+            axum::routing::put(clinician_registration::complete_profile),
+        )
+        .route(
+            "/api/v1/clinicians/:clinician_id/bank-account",
+            post(clinician_registration::add_bank_account),
         )
         .layer(TraceLayer::new_for_http())
         .layer(cors)

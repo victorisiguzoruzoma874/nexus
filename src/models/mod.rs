@@ -7,4 +7,5 @@ pub mod accreditation;
 pub mod location;
 pub mod billing;
 pub mod clinician;
+pub mod clinician_registration;
 pub mod shift;

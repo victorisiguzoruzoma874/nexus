@@ -6,6 +6,8 @@ pub mod payment_service;
 pub mod audit_service;
 pub mod notification_service;
 pub mod registration_service;
+pub mod sms_service;
+pub mod clinician_registration_service;
 
 pub use geocoding::{GeocodingClient, GeocodingError};
 pub use paystack::{PaystackClient, PaystackError};
@@ -15,3 +17,5 @@ pub use payment_service::{PaymentService, PaymentServiceError};
 pub use audit_service::{AuditService, AuditServiceError, RegistrationDetails};
 pub use notification_service::{NotificationService, NotificationError};
 pub use registration_service::{RegistrationService, RegistrationError, HospitalRegistrationResult, RegistrationStatusResponse};
+pub use sms_service::{SmsService, SmsError};
+pub use clinician_registration_service::{ClinicianRegistrationService, ClinicianRegistrationError};
