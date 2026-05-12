@@ -1,4 +1,9 @@
 use chrono::Utc;
+use lettre::{
+    message::header::ContentType,
+    transport::smtp::authentication::Credentials,
+    AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
+};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -6,24 +11,79 @@ use uuid::Uuid;
 pub enum NotificationError {
     #[error("Email sending failed: {0}")]
     EmailFailed(String),
-    
+
     #[error("Push notification failed: {0}")]
     PushFailed(String),
-    
+
     #[error("Notification logging failed: {0}")]
     LoggingFailed(String),
 }
 
-/// Service for sending email and push notifications (AC-05)
-/// Requirements: 5.1, 5.2, 5.3, 5.4, 5.5
 pub struct NotificationService {
-    // In production, these would be actual email/push clients
-    // For now, we'll use mock implementations
+    smtp: Option<Arc<AsyncSmtpTransport<Tokio1Executor>>>,
+    from_email: String,
+    from_name: String,
+    mock: bool,
 }
 
 impl NotificationService {
     pub fn new() -> Self {
-        Self {}
+        let smtp_host = std::env::var("SMTP_HOST").unwrap_or_default();
+        let smtp_user = std::env::var("SMTP_USERNAME").unwrap_or_default();
+        let smtp_pass = std::env::var("SMTP_PASSWORD").unwrap_or_default();
+        let from_email = std::env::var("SMTP_FROM_EMAIL")
+            .unwrap_or_else(|_| "noreply@nexuscare.com".to_string());
+        let from_name = std::env::var("SMTP_FROM_NAME")
+            .unwrap_or_else(|_| "NexusCare".to_string());
+
+        let mock = smtp_host.is_empty() || smtp_user.is_empty();
+
+        let smtp = if !mock {
+            let port: u16 = std::env::var("SMTP_PORT")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(587);
+            let creds = Credentials::new(smtp_user, smtp_pass);
+            AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&smtp_host)
+                .ok()
+                .map(|b| b.port(port).credentials(creds).build())
+                .map(Arc::new)
+        } else {
+            None
+        };
+
+        Self { smtp, from_email, from_name, mock }
+    }
+
+    /// Send a plain-text email. In mock mode, logs instead of sending.
+    pub async fn send_email(
+        &self,
+        to: &str,
+        subject: &str,
+        body: &str,
+    ) -> Result<(), NotificationError> {
+        if self.mock {
+            tracing::info!("[MOCK EMAIL] To: {} | Subject: {} | Body: {}", to, subject, body);
+            return Ok(());
+        }
+
+        let from = format!("{} <{}>", self.from_name, self.from_email);
+        let email = Message::builder()
+            .from(from.parse().map_err(|e| NotificationError::EmailFailed(format!("{}", e)))?)
+            .to(to.parse().map_err(|e| NotificationError::EmailFailed(format!("{}", e)))?)
+            .subject(subject)
+            .header(ContentType::TEXT_PLAIN)
+            .body(body.to_string())
+            .map_err(|e| NotificationError::EmailFailed(e.to_string()))?;
+
+        self.smtp
+            .as_ref()
+            .expect("SMTP transport not initialised")
+            .send(email)
+            .await
+            .map_err(|e| NotificationError::EmailFailed(e.to_string()))?;
+
+        Ok(())
     }
 
     /// Send approval notification to hospital admin
@@ -113,59 +173,21 @@ impl NotificationService {
         Ok(())
     }
 
-    /// Send email notification
-    /// Requirements: 5.1, 5.4
-    async fn send_email(
-        &self,
-        to: &str,
-        subject: &str,
-        body: &str,
-    ) -> Result<(), NotificationError> {
-        // In production, this would use an email service like SendGrid, AWS SES, etc.
-        // For now, we'll log the email
-        tracing::info!(
-            "Sending email to: {}\nSubject: {}\nBody: {}",
-            to,
-            subject,
-            body
-        );
-
-        // Simulate email sending
-        // In production: email_client.send(to, subject, body).await?;
-        
-        Ok(())
-    }
-
-    /// Send push notification
-    /// Requirements: 5.2, 5.4
+    /// Send push notification (stub — wire FCM when ready)
     async fn send_push(
         &self,
         hospital_id: Uuid,
         title: &str,
         message: &str,
     ) -> Result<(), NotificationError> {
-        // In production, this would use a push notification service like FCM, APNS, etc.
-        // For now, we'll log the notification
         tracing::info!(
-            "Sending push notification to hospital {}\nTitle: {}\nMessage: {}",
-            hospital_id,
-            title,
-            message
+            "[PUSH] hospital={} title={} message={}",
+            hospital_id, title, message
         );
-
-        // Simulate push notification
-        // In production: push_client.send(hospital_id, title, message).await?;
-        
         Ok(())
     }
 
-    /// Log notification delivery
-    /// Requirements: 5.5
-    async fn log_notification(
-        &self,
-        notification: NotificationRecord,
-    ) -> Result<(), NotificationError> {
-        // In production, this would store in the notifications table
+    async fn log_notification(&self, notification: NotificationRecord) -> Result<(), NotificationError> {
         tracing::info!(
             "Notification logged: hospital_id={}, type={:?}, email={}, timestamp={}",
             notification.hospital_id,
@@ -173,9 +195,6 @@ impl NotificationService {
             notification.email,
             notification.timestamp
         );
-
-        // In production: notification_repo.create(notification).await?;
-        
         Ok(())
     }
 }

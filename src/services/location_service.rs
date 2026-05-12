@@ -145,8 +145,8 @@ pub struct ServiceArea {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_validate_coordinates() {
+    #[tokio::test]
+    async fn test_validate_coordinates() {
         let geocoding_client = Arc::new(GeocodingClient::new(None));
         let location_repo = Arc::new(LocationRepository::new(
             sqlx::PgPool::connect("postgresql://localhost/test")
@@ -177,8 +177,8 @@ mod tests {
         assert!(service.validate_coordinates(&invalid_lon).is_err());
     }
 
-    #[test]
-    fn test_calculate_service_radius() {
+    #[tokio::test]
+    async fn test_calculate_service_radius() {
         let geocoding_client = Arc::new(GeocodingClient::new(None));
         let location_repo = Arc::new(LocationRepository::new(
             sqlx::PgPool::connect("postgresql://localhost/test")

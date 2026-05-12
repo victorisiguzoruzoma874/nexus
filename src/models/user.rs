@@ -25,6 +25,7 @@ pub struct User {
     pub first_name: String,
     pub last_name: String,
     pub email: String,
+    pub phone: Option<String>,
     #[serde(skip_serializing)]
     pub password_hash: String,
     pub role: UserRole,
@@ -52,6 +53,9 @@ pub struct CreateUserRequest {
     #[validate(email(message = "A valid email address is required"))]
     pub email: String,
 
+    /// Optional E.164 phone number (e.g. +2348012345678) — required for phone OTP login
+    pub phone: Option<String>,
+
     #[validate(length(min = 8, message = "Password must be at least 8 characters"))]
     pub password: String,
 
@@ -76,6 +80,7 @@ pub struct UserResponse {
     pub first_name: String,
     pub last_name: String,
     pub email: String,
+    pub phone: Option<String>,
     pub role: UserRole,
     pub role_label: Option<String>,
     pub avatar_url: Option<String>,
@@ -92,6 +97,7 @@ impl From<User> for UserResponse {
             first_name: u.first_name,
             last_name: u.last_name,
             email: u.email,
+            phone: u.phone,
             role: u.role,
             role_label: u.role_label,
             avatar_url: u.avatar_url,
@@ -114,4 +120,62 @@ pub struct Claims {
     pub exp: usize,
     /// Issued at (Unix timestamp)
     pub iat: usize,
+}
+
+/// Request to send a login OTP to a phone number (AC-01).
+#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
+pub struct PhoneLoginRequest {
+    #[validate(length(min = 7, max = 20, message = "Phone number is required"))]
+    pub phone: String,
+}
+
+/// Request to verify a phone OTP and complete login (AC-01).
+#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
+pub struct OtpVerifyRequest {
+    #[validate(length(min = 7, max = 20, message = "Phone number is required"))]
+    pub phone: String,
+    #[validate(length(equal = 6, message = "OTP must be 6 digits"))]
+    pub code: String,
+}
+
+/// Request to initiate a password reset (AC-03).
+#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
+pub struct ForgotPasswordRequest {
+    #[validate(email(message = "A valid email address is required"))]
+    pub email: String,
+}
+
+/// Request to complete a password reset (AC-03).
+#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
+pub struct ResetPasswordRequest {
+    #[validate(length(min = 1, message = "Token is required"))]
+    pub token: String,
+    #[validate(length(min = 8, message = "Password must be at least 8 characters"))]
+    pub new_password: String,
+}
+
+/// Request to refresh an access token (AC-04).
+#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
+pub struct RefreshTokenRequest {
+    #[validate(length(min = 1, message = "Refresh token is required"))]
+    pub refresh_token: String,
+}
+
+/// Request to logout (AC-05).
+#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
+pub struct LogoutRequest {
+    #[validate(length(min = 1, message = "Refresh token is required"))]
+    pub refresh_token: String,
+}
+
+/// Successful login response with tokens and role-based redirect (AC-06).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoginResponse {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub token_type: String,
+    pub expires_in: u64,
+    /// Role-specific dashboard path for client-side redirect (AC-06)
+    pub redirect_to: String,
+    pub user: UserResponse,
 }

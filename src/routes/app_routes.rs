@@ -21,6 +21,7 @@ use crate::repositories::{
 };
 use crate::services::{
     audit_service::AuditService,
+    auth_service::AuthService,
     encryption::EncryptionService,
     geocoding::GeocodingClient,
     location_service::LocationService,
@@ -38,6 +39,7 @@ pub struct AppState {
     pub pool: PgPool,
     pub registration_service: Arc<RegistrationService>,
     pub clinician_registration_service: Arc<ClinicianRegistrationService>,
+    pub auth_service: Arc<AuthService>,
 }
 
 /// API Documentation
@@ -142,7 +144,7 @@ pub fn create_router(pool: PgPool) -> Router {
         location_service,
         payment_service,
         audit_service,
-        notification_service,
+        notification_service.clone(),
         pool.clone(),
     ));
 
@@ -154,17 +156,21 @@ pub fn create_router(pool: PgPool) -> Router {
 
     let clinician_registration_service = Arc::new(ClinicianRegistrationService::new(
         clinician_repo,
-        sms_service,
+        sms_service.clone(),
         paystack_client.clone(),
         encryption_service.clone(),
         pool.clone(),
     ));
+
+    // Initialize auth service
+    let auth_service = Arc::new(AuthService::new(pool.clone(), sms_service, notification_service.clone()));
 
     // Create shared state
     let state = AppState {
         pool: pool.clone(),
         registration_service,
         clinician_registration_service,
+        auth_service,
     };
 
     Router::new()
@@ -176,6 +182,12 @@ pub fn create_router(pool: PgPool) -> Router {
         // Auth
         .route("/api/v1/auth/register", post(auth::register))
         .route("/api/v1/auth/login", post(auth::login))
+        .route("/api/v1/auth/otp/send", post(auth::phone_otp_send))
+        .route("/api/v1/auth/otp/verify", post(auth::phone_otp_verify))
+        .route("/api/v1/auth/forgot-password", post(auth::forgot_password))
+        .route("/api/v1/auth/reset-password", post(auth::reset_password))
+        .route("/api/v1/auth/refresh", post(auth::refresh_token))
+        .route("/api/v1/auth/logout", post(auth::logout))
         // Hospital Registration
         .route(
             "/api/v1/hospitals/register",

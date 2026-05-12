@@ -8,6 +8,7 @@ pub mod notification_service;
 pub mod registration_service;
 pub mod sms_service;
 pub mod clinician_registration_service;
+pub mod auth_service;
 
 pub use geocoding::{GeocodingClient, GeocodingError};
 pub use paystack::{PaystackClient, PaystackError};
