@@ -11,13 +11,14 @@ use tower_http::{
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
-use crate::handlers::{auth, health, hospitals, registration, clinician_registration};
+use crate::handlers::{auth, health, hospitals, registration, clinician_registration, shifts};
 use crate::repositories::{
     audit::AuditRepository,
     billing::BillingRepository,
     hospital::HospitalRepository,
     location::LocationRepository,
     clinician::ClinicianRepository,
+    shift::ShiftRepository,
 };
 use crate::services::{
     audit_service::AuditService,
@@ -31,6 +32,7 @@ use crate::services::{
     registration_service::RegistrationService,
     sms_service::SmsService,
     clinician_registration_service::ClinicianRegistrationService,
+    shift_service::ShiftService,
 };
 
 /// Shared application state
@@ -40,6 +42,7 @@ pub struct AppState {
     pub registration_service: Arc<RegistrationService>,
     pub clinician_registration_service: Arc<ClinicianRegistrationService>,
     pub auth_service: Arc<AuthService>,
+    pub shift_service: Arc<ShiftService>,
 }
 
 /// API Documentation
@@ -101,6 +104,7 @@ pub fn create_router(pool: PgPool) -> Router {
     let billing_repo = Arc::new(BillingRepository::new(pool.clone()));
     let audit_repo = Arc::new(AuditRepository::new(pool.clone()));
     let clinician_repo = Arc::new(ClinicianRepository::new(pool.clone()));
+    let shift_repo = Arc::new(ShiftRepository::new(pool.clone()));
 
     // Initialize external services
     let geocoding_client = Arc::new(GeocodingClient::new(
@@ -165,12 +169,16 @@ pub fn create_router(pool: PgPool) -> Router {
     // Initialize auth service
     let auth_service = Arc::new(AuthService::new(pool.clone(), sms_service, notification_service.clone()));
 
+    // Initialize shift service
+    let shift_service = Arc::new(ShiftService::new(shift_repo, pool.clone()));
+
     // Create shared state
     let state = AppState {
         pool: pool.clone(),
         registration_service,
         clinician_registration_service,
         auth_service,
+        shift_service,
     };
 
     // Create API routes
@@ -231,6 +239,9 @@ pub fn create_router(pool: PgPool) -> Router {
             "/api/v1/clinicians/{clinician_id}/bank-account",
             post(clinician_registration::add_bank_account),
         )
+        // Shifts
+        .route("/api/v1/shifts", post(shifts::create_shift))
+        .route("/api/v1/shifts/{shift_id}", get(shifts::get_shift))
         .layer(TraceLayer::new_for_http())
         .layer(cors)
         .with_state(state);
