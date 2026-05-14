@@ -3,7 +3,7 @@ use aes_gcm::{
     Aes256Gcm, Nonce,
 };
 use base64::{engine::general_purpose, Engine as _};
-use bcrypt::{hash, verify, DEFAULT_COST};
+use bcrypt::{hash, verify};
 
 #[derive(Debug, thiserror::Error)]
 pub enum EncryptionError {

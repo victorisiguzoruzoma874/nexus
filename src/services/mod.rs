@@ -9,6 +9,7 @@ pub mod registration_service;
 pub mod sms_service;
 pub mod clinician_registration_service;
 pub mod auth_service;
+pub mod shift_service;
 
 pub use geocoding::{GeocodingClient, GeocodingError};
 pub use paystack::{PaystackClient, PaystackError};
@@ -20,3 +21,4 @@ pub use notification_service::{NotificationService, NotificationError};
 pub use registration_service::{RegistrationService, RegistrationError, HospitalRegistrationResult, RegistrationStatusResponse};
 pub use sms_service::{SmsService, SmsError};
 pub use clinician_registration_service::{ClinicianRegistrationService, ClinicianRegistrationError};
+pub use shift_service::{ShiftService, ShiftServiceError};

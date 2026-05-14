@@ -4,14 +4,13 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use uuid::Uuid;
 use utoipa::ToSchema;
 
 use crate::models::admin_registration::HospitalRegistrationRequest;
 use crate::routes::AppState;
 use crate::services::registration_service::{
-    RegistrationService, RegistrationError, RegistrationStatusResponse,
+    RegistrationError, RegistrationStatusResponse,
 };
 
 /// Response for hospital registration

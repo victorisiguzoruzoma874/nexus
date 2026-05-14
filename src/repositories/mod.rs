@@ -3,6 +3,7 @@ pub mod location;
 pub mod billing;
 pub mod audit;
 pub mod clinician;
+pub mod shift;
 
 pub use hospital::HospitalRepository;
 pub use location::LocationRepository;

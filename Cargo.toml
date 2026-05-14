@@ -12,7 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 # Web framework
-axum = { version = "0.7.9", features = ["macros"] }
+axum = { version = "0.8", features = ["macros"] }
 tokio = { version = "1.44.2", features = ["full"] }
 tower = { version = "0.5.2" }
 tower-http = { version = "0.6.4", features = ["cors", "trace"] }
@@ -64,7 +64,7 @@ reqwest = { version = "0.12.15", features = ["json", "rustls-tls"], default-feat
 
 # API Documentation (Swagger/OpenAPI)
 utoipa = { version = "5.3.1", features = ["axum_extras", "chrono", "uuid"] }
-utoipa-swagger-ui = { version = "8.1.0", features = ["axum"] }
+utoipa-swagger-ui = { version = "9", features = ["axum"] }
 utoipa-rapidoc = { version = "6.0.0", features = ["axum"] }
 utoipa-redoc = { version = "6.0.0", features = ["axum"] }
 hex = "0.4.3"

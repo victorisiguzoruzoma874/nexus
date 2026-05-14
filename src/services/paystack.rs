@@ -51,7 +51,9 @@ struct PaystackResponse {
 #[derive(Debug, Deserialize)]
 struct PaystackData {
     authorization_code: Option<String>,
+    #[allow(dead_code)]
     last4: Option<String>,
+    #[allow(dead_code)]
     bin: Option<String>,
 }
 
