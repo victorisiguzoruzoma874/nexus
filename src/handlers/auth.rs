@@ -16,6 +16,19 @@ use crate::{
 // ---------------------------------------------------------------------------
 
 /// POST /api/v1/auth/register
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/register",
+    request_body = CreateUserRequest,
+    responses(
+        (status = 201, description = "User registered successfully", body = UserResponse),
+        (status = 409, description = "Email already registered"),
+        (status = 422, description = "Validation error")
+    ),
+    tag = "auth",
+    summary = "Register a new user",
+    description = "Create a new user account with email and password"
+)]
 pub async fn register(
     State(state): State<AppState>,
     Json(payload): Json<CreateUserRequest>,
@@ -58,6 +71,20 @@ pub async fn register(
 }
 
 /// POST /api/v1/auth/login  (AC-02: email + password)
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/login",
+    request_body = LoginRequest,
+    responses(
+        (status = 200, description = "Login successful", body = LoginResponse),
+        (status = 401, description = "Invalid credentials"),
+        (status = 403, description = "Account deactivated"),
+        (status = 422, description = "Validation error")
+    ),
+    tag = "auth",
+    summary = "Login with email and password",
+    description = "Authenticate user with email and password, returns JWT tokens"
+)]
 pub async fn login(
     State(state): State<AppState>,
     Json(payload): Json<LoginRequest>,
@@ -77,6 +104,19 @@ pub async fn login(
 // ---------------------------------------------------------------------------
 
 /// POST /api/v1/auth/otp/send
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/otp/send",
+    request_body = PhoneLoginRequest,
+    responses(
+        (status = 204, description = "OTP sent successfully"),
+        (status = 404, description = "Phone number not found"),
+        (status = 422, description = "Validation error")
+    ),
+    tag = "auth",
+    summary = "Send OTP to phone number",
+    description = "Send a 6-digit OTP code to the user's phone number for authentication"
+)]
 pub async fn phone_otp_send(
     State(state): State<AppState>,
     Json(payload): Json<PhoneLoginRequest>,
@@ -92,6 +132,19 @@ pub async fn phone_otp_send(
 }
 
 /// POST /api/v1/auth/otp/verify
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/otp/verify",
+    request_body = OtpVerifyRequest,
+    responses(
+        (status = 200, description = "OTP verified, login successful", body = LoginResponse),
+        (status = 401, description = "Invalid or expired OTP"),
+        (status = 422, description = "Validation error")
+    ),
+    tag = "auth",
+    summary = "Verify OTP and login",
+    description = "Verify the OTP code and complete phone-based authentication"
+)]
 pub async fn phone_otp_verify(
     State(state): State<AppState>,
     Json(payload): Json<OtpVerifyRequest>,
@@ -111,6 +164,19 @@ pub async fn phone_otp_verify(
 // ---------------------------------------------------------------------------
 
 /// POST /api/v1/auth/forgot-password
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/forgot-password",
+    request_body = ForgotPasswordRequest,
+    responses(
+        (status = 204, description = "Password reset email sent"),
+        (status = 404, description = "Email not found"),
+        (status = 422, description = "Validation error")
+    ),
+    tag = "auth",
+    summary = "Request password reset",
+    description = "Send a password reset link to the user's email address"
+)]
 pub async fn forgot_password(
     State(state): State<AppState>,
     Json(payload): Json<ForgotPasswordRequest>,
@@ -126,6 +192,19 @@ pub async fn forgot_password(
 }
 
 /// POST /api/v1/auth/reset-password
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/reset-password",
+    request_body = ResetPasswordRequest,
+    responses(
+        (status = 204, description = "Password reset successful"),
+        (status = 401, description = "Invalid or expired token"),
+        (status = 422, description = "Validation error")
+    ),
+    tag = "auth",
+    summary = "Reset password with token",
+    description = "Reset user password using the token from the reset email"
+)]
 pub async fn reset_password(
     State(state): State<AppState>,
     Json(payload): Json<ResetPasswordRequest>,
@@ -145,6 +224,19 @@ pub async fn reset_password(
 // ---------------------------------------------------------------------------
 
 /// POST /api/v1/auth/refresh
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/refresh",
+    request_body = RefreshTokenRequest,
+    responses(
+        (status = 200, description = "Token refreshed successfully", body = LoginResponse),
+        (status = 401, description = "Invalid or expired refresh token"),
+        (status = 422, description = "Validation error")
+    ),
+    tag = "auth",
+    summary = "Refresh access token",
+    description = "Get a new access token using a valid refresh token"
+)]
 pub async fn refresh_token(
     State(state): State<AppState>,
     Json(payload): Json<RefreshTokenRequest>,
@@ -164,6 +256,19 @@ pub async fn refresh_token(
 // ---------------------------------------------------------------------------
 
 /// POST /api/v1/auth/logout
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/logout",
+    request_body = LogoutRequest,
+    responses(
+        (status = 204, description = "Logout successful"),
+        (status = 401, description = "Invalid refresh token"),
+        (status = 422, description = "Validation error")
+    ),
+    tag = "auth",
+    summary = "Logout user",
+    description = "Revoke the refresh token and logout the user"
+)]
 pub async fn logout(
     State(state): State<AppState>,
     Json(payload): Json<LogoutRequest>,

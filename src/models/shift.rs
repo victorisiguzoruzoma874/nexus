@@ -3,13 +3,14 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
 use validator::Validate;
+use utoipa::ToSchema;
 
 // ---------------------------------------------------------------------------
 // Enums
 // ---------------------------------------------------------------------------
 
 /// Lifecycle status of a shift.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type, ToSchema)]
 #[sqlx(type_name = "shift_status", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum ShiftStatus {
@@ -28,7 +29,7 @@ pub enum ShiftStatus {
 }
 
 /// Priority level of an open shift — shown as badge on the dashboard.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type, ToSchema)]
 #[sqlx(type_name = "shift_priority", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum ShiftPriority {
@@ -41,7 +42,7 @@ pub enum ShiftPriority {
 }
 
 /// Delivery mode of a shift — shown as radio toggle in the wizard.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type, ToSchema)]
 #[sqlx(type_name = "shift_type", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum ShiftType {
@@ -53,7 +54,7 @@ pub enum ShiftType {
 
 /// Broad role category selected in Step 1 of the shift wizard.
 /// Separate from the free-text `role_title` and `specialty`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type, ToSchema)]
 #[sqlx(type_name = "role_category", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum RoleCategory {
@@ -84,7 +85,7 @@ pub enum ShiftWizardStep {
 }
 
 /// Pay type for a shift — radio toggle in Step 2 (Shift Compensation).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type, ToSchema)]
 #[sqlx(type_name = "pay_type", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum PayType {
@@ -113,10 +114,13 @@ pub enum ClockinMethod {
 
 /// A shift posting created by a hospital.
 /// Shown in "Today's Active Shifts" and "Open Shifts Needing Staff" on the dashboard.
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct Shift {
     pub id: Uuid,
     pub hospital_id: Uuid,
+    /// Name of the hospital that created this shift
+    #[sqlx(default)]
+    pub hospital_name: Option<String>,
 
     /// Broad role category, e.g. Doctor, Nurse (Step 1 dropdown)
     pub role_category: RoleCategory,
@@ -516,7 +520,7 @@ pub struct ShiftWizardDraft {
 // ---------------------------------------------------------------------------
 
 /// Payload for creating a new shift posting.
-#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
+#[derive(Debug, Clone, Serialize, Deserialize, Validate, ToSchema)]
 pub struct CreateShiftRequest {
     pub role_category: RoleCategory,
 

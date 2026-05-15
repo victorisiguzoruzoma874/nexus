@@ -41,10 +41,11 @@ impl PaymentService {
     }
 
     /// Tokenize payment method and store encrypted token
-    /// Requirements: 3.1, 3.2, 3.5
     /// 
-    /// CRITICAL: This method ensures raw payment data is NEVER stored.
-    /// Flow: Raw data → Paystack (tokenize) → Encrypt token → Store encrypted token
+    /// Ensures raw payment data is NEVER stored. Flow: Raw data → Paystack (tokenize) 
+    /// → Encrypt token → Store encrypted token.
+    /// 
+    /// Requirements: 3.1, 3.2, 3.5
     pub async fn tokenize_and_store(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -53,23 +54,18 @@ impl PaymentService {
         added_by: Option<Uuid>,
         idempotency_key: Option<String>,
     ) -> Result<HospitalPaymentMethod, PaymentServiceError> {
-        // Step 1: Tokenize payment method via Paystack
-        // Raw payment data is sent to Paystack and we receive only a token
         let payment_token = self
             .paystack_client
             .tokenize_payment_method(&payment_details, idempotency_key)
             .await?;
 
-        // Step 2: Encrypt the token before storage (AES-256)
         let encrypted_token = self.encryption_service.encrypt_token(&payment_token)?;
 
-        // Step 3: Extract last 4 digits for display (if card payment)
         let last_four = payment_details
             .card_number
             .as_ref()
             .and_then(|card| card.chars().rev().take(4).collect::<String>().chars().rev().collect::<String>().into());
 
-        // Step 4: Create billing record
         let new_billing = NewBillingInfo {
             hospital_id,
             payment_provider: "paystack".to_string(),
@@ -78,13 +74,13 @@ impl PaymentService {
             last_four,
         };
 
-        // Step 5: Store in database (only encrypted token, never raw data)
         let billing_info = self.billing_repo.create(tx, new_billing, added_by).await?;
 
         Ok(billing_info)
     }
 
     /// Validate that payment method is properly configured
+    /// 
     /// Requirements: 3.5
     pub async fn validate_payment_method(
         &self,
@@ -92,7 +88,6 @@ impl PaymentService {
     ) -> Result<bool, PaymentServiceError> {
         match self.billing_repo.find_by_hospital_id(hospital_id).await? {
             Some(payment_method) => {
-                // Check if payment method is active and has encrypted token
                 Ok(payment_method.is_active && !payment_method.paystack_authorization_code.is_empty())
             }
             None => Ok(false),
@@ -100,12 +95,12 @@ impl PaymentService {
     }
 
     /// Mark payment setup as complete for a hospital
+    /// 
     /// Requirements: 3.5
     pub async fn mark_payment_setup_complete(
         &self,
         hospital_id: Uuid,
     ) -> Result<bool, PaymentServiceError> {
-        // Verify payment method exists and is valid
         self.validate_payment_method(hospital_id).await
     }
 }

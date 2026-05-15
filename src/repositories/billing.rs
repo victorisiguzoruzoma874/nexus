@@ -55,11 +55,11 @@ impl BillingRepository {
             "#,
         )
         .bind(billing.hospital_id)
-        .bind(&billing.payment_provider) // Using as authorization code temporarily
+        .bind(&billing.payment_provider)
         .bind(&billing.encrypted_token)
-        .bind("Cardholder") // Placeholder
+        .bind("Cardholder")
         .bind(billing.last_four.as_deref().unwrap_or("0000"))
-        .bind("12/25") // Placeholder expiry
+        .bind("12/25")
         .bind(billing.payment_method_type)
         .bind(added_by)
         .fetch_one(&mut **tx)

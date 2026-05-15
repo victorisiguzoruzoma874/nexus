@@ -12,6 +12,19 @@ use crate::utils::errors::{AppError, AppResult};
 
 /// POST /api/v1/clinicians/otp/send
 /// AC-01: Send OTP to phone number
+#[utoipa::path(
+    post,
+    path = "/api/v1/clinicians/otp/send",
+    request_body = SendOtpRequest,
+    responses(
+        (status = 200, description = "OTP sent successfully", body = SendOtpResponse),
+        (status = 409, description = "Phone number already registered"),
+        (status = 422, description = "Validation error")
+    ),
+    tag = "clinicians",
+    summary = "Send OTP for clinician registration",
+    description = "Send a 6-digit OTP code to the clinician's phone number to start registration"
+)]
 pub async fn send_otp(
     State(state): State<AppState>,
     Json(req): Json<SendOtpRequest>,
@@ -28,6 +41,18 @@ pub async fn send_otp(
 
 /// POST /api/v1/clinicians/otp/verify
 /// AC-02: Verify OTP and create account
+#[utoipa::path(
+    post,
+    path = "/api/v1/clinicians/otp/verify",
+    request_body = VerifyOtpRequest,
+    responses(
+        (status = 201, description = "Account created successfully", body = VerifyOtpResponse),
+        (status = 422, description = "Invalid or expired OTP")
+    ),
+    tag = "clinicians",
+    summary = "Verify OTP and create clinician account",
+    description = "Verify the OTP code and create a new clinician account with JWT token"
+)]
 pub async fn verify_otp(
     State(state): State<AppState>,
     Json(req): Json<VerifyOtpRequest>,
@@ -44,6 +69,22 @@ pub async fn verify_otp(
 
 /// PUT /api/v1/clinicians/{clinician_id}/profile
 /// AC-03: Complete profile
+#[utoipa::path(
+    put,
+    path = "/api/v1/clinicians/{clinician_id}/profile",
+    request_body = CompleteProfileRequest,
+    params(
+        ("clinician_id" = Uuid, Path, description = "Clinician unique identifier")
+    ),
+    responses(
+        (status = 200, description = "Profile completed successfully", body = ProfileResponse),
+        (status = 404, description = "Clinician not found"),
+        (status = 422, description = "Validation error")
+    ),
+    tag = "clinicians",
+    summary = "Complete clinician profile",
+    description = "Complete the clinician profile with personal and professional information"
+)]
 pub async fn complete_profile(
     State(state): State<AppState>,
     axum::extract::Path(clinician_id): axum::extract::Path<Uuid>,
@@ -61,6 +102,22 @@ pub async fn complete_profile(
 
 /// POST /api/v1/clinicians/{clinician_id}/bank-account
 /// AC-04: Add and validate bank account
+#[utoipa::path(
+    post,
+    path = "/api/v1/clinicians/{clinician_id}/bank-account",
+    request_body = AddBankAccountRequest,
+    params(
+        ("clinician_id" = Uuid, Path, description = "Clinician unique identifier")
+    ),
+    responses(
+        (status = 200, description = "Bank account added successfully", body = BankAccountResponse),
+        (status = 404, description = "Clinician not found"),
+        (status = 422, description = "Bank account validation failed")
+    ),
+    tag = "clinicians",
+    summary = "Add and validate bank account",
+    description = "Add a bank account for the clinician and validate it with Paystack"
+)]
 pub async fn add_bank_account(
     State(state): State<AppState>,
     axum::extract::Path(clinician_id): axum::extract::Path<Uuid>,

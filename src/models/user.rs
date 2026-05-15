@@ -3,9 +3,10 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
 use validator::Validate;
+use utoipa::ToSchema;
 
 /// Role of a user within the platform.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type, ToSchema)]
 #[sqlx(type_name = "user_role", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum UserRole {
@@ -40,7 +41,7 @@ pub struct User {
 }
 
 /// Payload for creating a new user account.
-#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
+#[derive(Debug, Clone, Serialize, Deserialize, Validate, ToSchema)]
 pub struct CreateUserRequest {
     pub hospital_id: Option<Uuid>,
 
@@ -63,7 +64,7 @@ pub struct CreateUserRequest {
 }
 
 /// Login request payload.
-#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
+#[derive(Debug, Clone, Serialize, Deserialize, Validate, ToSchema)]
 pub struct LoginRequest {
     #[validate(email)]
     pub email: String,
@@ -73,7 +74,7 @@ pub struct LoginRequest {
 }
 
 /// Safe user response (no password hash).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct UserResponse {
     pub id: Uuid,
     pub hospital_id: Option<Uuid>,
@@ -123,14 +124,14 @@ pub struct Claims {
 }
 
 /// Request to send a login OTP to a phone number (AC-01).
-#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
+#[derive(Debug, Clone, Serialize, Deserialize, Validate, ToSchema)]
 pub struct PhoneLoginRequest {
     #[validate(length(min = 7, max = 20, message = "Phone number is required"))]
     pub phone: String,
 }
 
 /// Request to verify a phone OTP and complete login (AC-01).
-#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
+#[derive(Debug, Clone, Serialize, Deserialize, Validate, ToSchema)]
 pub struct OtpVerifyRequest {
     #[validate(length(min = 7, max = 20, message = "Phone number is required"))]
     pub phone: String,
@@ -139,14 +140,14 @@ pub struct OtpVerifyRequest {
 }
 
 /// Request to initiate a password reset (AC-03).
-#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
+#[derive(Debug, Clone, Serialize, Deserialize, Validate, ToSchema)]
 pub struct ForgotPasswordRequest {
     #[validate(email(message = "A valid email address is required"))]
     pub email: String,
 }
 
 /// Request to complete a password reset (AC-03).
-#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
+#[derive(Debug, Clone, Serialize, Deserialize, Validate, ToSchema)]
 pub struct ResetPasswordRequest {
     #[validate(length(min = 1, message = "Token is required"))]
     pub token: String,
@@ -155,21 +156,21 @@ pub struct ResetPasswordRequest {
 }
 
 /// Request to refresh an access token (AC-04).
-#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
+#[derive(Debug, Clone, Serialize, Deserialize, Validate, ToSchema)]
 pub struct RefreshTokenRequest {
     #[validate(length(min = 1, message = "Refresh token is required"))]
     pub refresh_token: String,
 }
 
 /// Request to logout (AC-05).
-#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
+#[derive(Debug, Clone, Serialize, Deserialize, Validate, ToSchema)]
 pub struct LogoutRequest {
     #[validate(length(min = 1, message = "Refresh token is required"))]
     pub refresh_token: String,
 }
 
 /// Successful login response with tokens and role-based redirect (AC-06).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct LoginResponse {
     pub access_token: String,
     pub refresh_token: String,

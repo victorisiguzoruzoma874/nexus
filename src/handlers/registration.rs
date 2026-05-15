@@ -11,6 +11,7 @@ use crate::models::admin_registration::HospitalRegistrationRequest;
 use crate::routes::AppState;
 use crate::services::registration_service::{
     RegistrationError, RegistrationStatusResponse,
+    HospitalListResponse,
 };
 
 /// Response for hospital registration
@@ -52,6 +53,8 @@ pub struct ErrorResponse {
 }
 
 /// Register a new hospital
+/// 
+/// Handles hospital registration requests. In production, user_id should come from JWT token.
 #[utoipa::path(
     post,
     path = "/api/v1/hospitals/register",
@@ -68,7 +71,6 @@ pub async fn register_hospital(
     State(state): State<AppState>,
     Json(request): Json<HospitalRegistrationRequest>,
 ) -> Result<(StatusCode, Json<HospitalRegistrationResponse>), (StatusCode, Json<ErrorResponse>)> {
-    // For now, use a mock user ID - in production this would come from JWT token
     let user_id = Uuid::new_v4();
 
     match state.registration_service.register_hospital(user_id, request).await {
@@ -104,7 +106,7 @@ pub async fn register_hospital(
     }
 }
 
-/// Get registration status
+/// Get registration status for a hospital
 #[utoipa::path(
     get,
     path = "/api/v1/hospitals/{hospital_id}/status",
@@ -140,7 +142,9 @@ pub async fn get_registration_status(
     }
 }
 
-/// Approve hospital registration (Admin only)
+/// Approve hospital registration
+/// 
+/// Admin-only endpoint. In production, admin_id should come from JWT token.
 #[utoipa::path(
     post,
     path = "/api/v1/admin/hospitals/{hospital_id}/approve",
@@ -163,7 +167,6 @@ pub async fn approve_hospital(
     Path(hospital_id): Path<Uuid>,
     Json(request): Json<ApprovalRequest>,
 ) -> Result<Json<StatusChangeResponse>, (StatusCode, Json<ErrorResponse>)> {
-    // For now, use None for admin ID - in production this would come from JWT token
     let admin_id = None;
 
     match state.registration_service.approve_hospital(hospital_id, admin_id, request.notes).await {
@@ -190,7 +193,9 @@ pub async fn approve_hospital(
     }
 }
 
-/// Reject hospital registration (Admin only)
+/// Reject hospital registration
+/// 
+/// Admin-only endpoint. In production, admin_id should come from JWT token.
 #[utoipa::path(
     post,
     path = "/api/v1/admin/hospitals/{hospital_id}/reject",
@@ -214,7 +219,6 @@ pub async fn reject_hospital(
     Path(hospital_id): Path<Uuid>,
     Json(request): Json<RejectionRequest>,
 ) -> Result<Json<StatusChangeResponse>, (StatusCode, Json<ErrorResponse>)> {
-    // For now, use None for admin ID - in production this would come from JWT token
     let admin_id = None;
 
     match state.registration_service.reject_hospital(hospital_id, admin_id, request.reason).await {
@@ -240,4 +244,69 @@ pub async fn reject_hospital(
             ))
         }
     }
+}
+
+/// List all hospitals with optional filtering and pagination
+#[utoipa::path(
+    get,
+    path = "/api/v1/hospitals",
+    tag = "hospitals",
+    params(
+        ("status" = Option<String>, Query, description = "Filter by status: pending, approved, rejected"),
+        ("page" = Option<i64>, Query, description = "Page number (default: 1)"),
+        ("page_size" = Option<i64>, Query, description = "Items per page (default: 20, max: 100)")
+    ),
+    responses(
+        (status = 200, description = "Hospitals retrieved successfully", body = HospitalListResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    )
+)]
+pub async fn list_hospitals(
+    State(state): State<AppState>,
+    axum::extract::Query(params): axum::extract::Query<ListHospitalsQuery>,
+) -> Result<Json<HospitalListResponse>, (StatusCode, Json<ErrorResponse>)> {
+    use crate::models::registration::RegistrationStatus;
+    
+    let status_filter = if let Some(status_str) = params.status {
+        match status_str.to_lowercase().as_str() {
+            "pending" => Some(RegistrationStatus::Pending),
+            "approved" => Some(RegistrationStatus::Approved),
+            "rejected" => Some(RegistrationStatus::Rejected),
+            _ => {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorResponse {
+                        code: "INVALID_STATUS".to_string(),
+                        message: "Status must be one of: pending, approved, rejected".to_string(),
+                    }),
+                ));
+            }
+        }
+    } else {
+        None
+    };
+
+    let page = params.page.unwrap_or(1);
+    let page_size = params.page_size.unwrap_or(20);
+
+    match state.registration_service.list_hospitals(status_filter, page, page_size).await {
+        Ok(response) => Ok(Json(response)),
+        Err(e) => {
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    code: "ERROR".to_string(),
+                    message: e.to_string(),
+                }),
+            ))
+        }
+    }
+}
+
+/// Query parameters for listing hospitals
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct ListHospitalsQuery {
+    pub status: Option<String>,
+    pub page: Option<i64>,
+    pub page_size: Option<i64>,
 }

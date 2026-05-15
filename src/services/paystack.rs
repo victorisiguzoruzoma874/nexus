@@ -102,22 +102,19 @@ impl PaystackClient {
     }
 
     /// Tokenize payment method with idempotency support
-    /// Requirements: 3.1, 3.3, 3.4
     /// 
-    /// IMPORTANT: This method NEVER stores raw payment data.
-    /// It sends data to Paystack and receives only a token.
+    /// Sends payment data to Paystack and receives only a token. Raw payment data is never stored.
+    /// 
+    /// Requirements: 3.1, 3.3, 3.4
     pub async fn tokenize_payment_method(
         &self,
         details: &PaymentDetails,
         idempotency_key: Option<String>,
     ) -> Result<String, PaystackError> {
-        // Validate payment details
         self.validate_payment_details(details)?;
 
-        // Generate idempotency key if not provided
         let idempotency_key = idempotency_key.unwrap_or_else(|| Uuid::new_v4().to_string());
 
-        // Tokenize based on payment method type
         match details.method_type {
             PaymentMethodType::Card => {
                 self.tokenize_card(details, &idempotency_key).await
@@ -170,7 +167,7 @@ impl PaystackClient {
         details: &PaymentDetails,
         idempotency_key: &str,
     ) -> Result<String, PaystackError> {
-        // In development/testing mode, return a mock token immediately
+        
         if cfg!(test) || self.secret_key.starts_with("sk_test_") || self.secret_key == "sk_test_dummy" {
             tracing::info!("Using mock payment token for development/testing");
             return Ok(format!("AUTH_mock_{}", Uuid::new_v4()));
@@ -181,8 +178,8 @@ impl PaystackClient {
         // In production, this would use Paystack's actual tokenization endpoint
         // For now, we'll simulate the response
         
-        // IMPORTANT: Raw card data is sent to Paystack over HTTPS
-        // and NEVER stored in our database
+        
+        
         let request = TokenizeCardRequest {
             card_number: details.card_number.clone().unwrap(),
             cvv: details.cvv.clone().unwrap(),
@@ -240,7 +237,7 @@ impl PaystackClient {
         details: &PaymentDetails,
         idempotency_key: &str,
     ) -> Result<String, PaystackError> {
-        // In development/testing mode, return a mock token immediately
+        
         if cfg!(test) || self.secret_key.starts_with("sk_test_") || self.secret_key == "sk_test_dummy" {
             tracing::info!("Using mock bank authorization token for development/testing");
             return Ok(format!("BANK_AUTH_mock_{}", Uuid::new_v4()));

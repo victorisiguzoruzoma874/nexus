@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::models::admin_registration::{HospitalRegistrationRequest, NewHospital};
+use crate::models::hospital::Hospital;
 use crate::models::registration::RegistrationStatus;
 use crate::repositories::hospital::{HospitalRepository, RepositoryError};
 use crate::services::audit_service::{AuditService, AuditServiceError, RegistrationDetails};
@@ -89,55 +90,41 @@ impl RegistrationService {
     }
 
     /// Register a new hospital with complete workflow
+    /// 
+    /// Orchestrates the complete registration workflow including validation, hospital creation,
+    /// location geocoding, payment tokenization, and audit logging. All operations are wrapped
+    /// in a database transaction for atomicity.
+    /// 
     /// Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 2.1, 2.2, 2.3, 3.1, 3.2, 10.1
-    /// 
-    /// This method orchestrates the complete registration workflow:
-    /// 1. Validate registration data
-    /// 2. Check for duplicate email registrations
-    /// 3. Create hospital record with status 'pending'
-    /// 4. Geocode and store location
-    /// 5. Tokenize and store payment method
-    /// 6. Log registration event in audit trail
-    /// 
-    /// All operations are wrapped in a database transaction for atomicity.
     pub async fn register_hospital(
         &self,
         user_id: Uuid,
         request: HospitalRegistrationRequest,
     ) -> Result<HospitalRegistrationResult, RegistrationError> {
-        // Step 1: Validate registration data
         self.validate_registration_data(&request)?;
 
-        // Step 2: Check for duplicate registration
         if self.check_duplicate_registration(&request.email).await? {
             return Err(RegistrationError::DuplicateRegistration(request.email.clone()));
         }
 
-        // Step 3: Start database transaction
         let mut tx = self.db_pool.begin().await?;
 
-        // Step 4: Create hospital record with status 'pending'
-        // Note: admin_user_id is set to None during initial registration
-        // The user account will be created later in the onboarding flow
         let new_hospital = NewHospital {
             name: request.hospital_name.clone(),
             email: request.email.clone(),
             phone: request.phone.clone(),
             registration_number: request.registration_number.clone(),
-            admin_user_id: None, // Will be set when user account is created
+            admin_user_id: None,
         };
 
         let hospital = self.hospital_repo.create(&mut tx, new_hospital).await?;
         let hospital_id = hospital.id;
 
-        // Step 5: Geocode and store location
         let _location = self
             .location_service
             .geocode_and_store(&mut tx, hospital_id, request.address.clone())
             .await?;
 
-        // Step 6: Tokenize and store payment method
-        // Generate idempotency key for payment tokenization
         let idempotency_key = Some(format!("reg-{}-{}", hospital_id, user_id));
         
         let _payment_method = self
@@ -146,22 +133,19 @@ impl RegistrationService {
                 &mut tx,
                 hospital_id,
                 request.payment_details.clone(),
-                None, // No user account yet during registration
+                None,
                 idempotency_key,
             )
             .await?;
 
-        // Step 7: Commit transaction
         tx.commit().await?;
 
-        // Step 8: Log registration event (outside transaction - fire-and-forget)
         let registration_details = RegistrationDetails {
             hospital_name: request.hospital_name.clone(),
             email: request.email.clone(),
             registration_number: request.registration_number.clone(),
         };
 
-        // Log audit event (don't fail registration if audit fails)
         if let Err(e) = self
             .audit_service
             .log_registration(hospital_id, None, registration_details)
@@ -170,7 +154,6 @@ impl RegistrationService {
             eprintln!("Warning: Failed to log registration audit: {}", e);
         }
 
-        // Step 9: Return success response
         Ok(HospitalRegistrationResult {
             hospital_id,
             status: RegistrationStatus::Pending,
@@ -286,17 +269,14 @@ impl RegistrationService {
         admin_id: Option<Uuid>,
         notes: Option<String>,
     ) -> Result<(), RegistrationError> {
-        // Step 1: Start transaction
         let mut tx = self.db_pool.begin().await?;
 
-        // Step 2: Get current hospital status
         let hospital = self
             .hospital_repo
             .find_by_id(hospital_id)
             .await?
             .ok_or(RegistrationError::NotFound(hospital_id))?;
 
-        // Step 3: Validate status transition
         if hospital.admin_registration_status != Some(RegistrationStatus::Pending) {
             return Err(RegistrationError::InvalidStatusTransition(
                 hospital.admin_registration_status.unwrap_or(RegistrationStatus::Pending),
@@ -304,7 +284,6 @@ impl RegistrationService {
             ));
         }
 
-        // Step 4: Update status to 'approved'
         self.hospital_repo
             .update_status(
                 &mut tx,
@@ -315,10 +294,8 @@ impl RegistrationService {
             )
             .await?;
 
-        // Step 5: Commit transaction
         tx.commit().await?;
 
-        // Step 6: Log status change (outside transaction)
         if let Err(e) = self
             .audit_service
             .log_status_change(
@@ -333,7 +310,6 @@ impl RegistrationService {
             eprintln!("Warning: Failed to log approval audit: {}", e);
         }
 
-        // Step 7: Send approval notifications
         if let Err(e) = self
             .notification_service
             .send_approval_notification(hospital_id, hospital.name.clone(), hospital.email.clone())
@@ -344,22 +320,20 @@ impl RegistrationService {
 
         Ok(())
     }
-
     /// Reject a pending hospital registration
     /// Requirements: 4.4, 4.5, 5.4
+    /// Reject a hospital registration
     /// 
-    /// This method:
-    /// 1. Updates hospital status to 'rejected'
-    /// 2. Stores rejection reason
-    /// 3. Logs status change in audit trail
-    /// 4. Sends rejection notifications (email + push)
+    /// Updates hospital status to rejected with reason, logs the change in audit trail,
+    /// and sends rejection notifications. Validates rejection reason length (10-500 chars).
+    /// 
+    /// Requirements: 4.1, 4.2, 4.3, 4.4, 4.5
     pub async fn reject_hospital(
         &self,
         hospital_id: Uuid,
         admin_id: Option<Uuid>,
         reason: String,
     ) -> Result<(), RegistrationError> {
-        // Validate rejection reason
         if reason.trim().is_empty() {
             return Err(RegistrationError::ValidationError(
                 "Rejection reason cannot be empty".to_string(),
@@ -372,17 +346,14 @@ impl RegistrationService {
             ));
         }
 
-        // Step 1: Start transaction
         let mut tx = self.db_pool.begin().await?;
 
-        // Step 2: Get current hospital status
         let hospital = self
             .hospital_repo
             .find_by_id(hospital_id)
             .await?
             .ok_or(RegistrationError::NotFound(hospital_id))?;
 
-        // Step 3: Validate status transition
         if hospital.admin_registration_status != Some(RegistrationStatus::Pending) {
             return Err(RegistrationError::InvalidStatusTransition(
                 hospital.admin_registration_status.unwrap_or(RegistrationStatus::Pending),
@@ -390,7 +361,6 @@ impl RegistrationService {
             ));
         }
 
-        // Step 4: Update status to 'rejected' with reason
         self.hospital_repo
             .update_status(
                 &mut tx,
@@ -401,10 +371,8 @@ impl RegistrationService {
             )
             .await?;
 
-        // Step 5: Commit transaction
         tx.commit().await?;
 
-        // Step 6: Log status change (outside transaction)
         if let Err(e) = self
             .audit_service
             .log_status_change(
@@ -419,7 +387,6 @@ impl RegistrationService {
             eprintln!("Warning: Failed to log rejection audit: {}", e);
         }
 
-        // Step 7: Send rejection notifications
         if let Err(e) = self
             .notification_service
             .send_rejection_notification(hospital_id, hospital.name.clone(), hospital.email.clone(), reason)
@@ -453,6 +420,90 @@ impl RegistrationService {
             rejection_reason: None, // Will be populated from hospital.rejection_reason when available
         })
     }
+
+    /// List all hospitals with optional status filter and pagination
+    /// Requirements: 4.2
+    pub async fn list_hospitals(
+        &self,
+        status_filter: Option<RegistrationStatus>,
+        page: i64,
+        page_size: i64,
+    ) -> Result<HospitalListResponse, RegistrationError> {
+        // Validate pagination parameters
+        let page = page.max(1);
+        let page_size = page_size.clamp(1, 100); // Max 100 items per page
+        let offset = (page - 1) * page_size;
+
+        // Get hospitals
+        let hospitals = self
+            .hospital_repo
+            .list_all(status_filter, page_size, offset)
+            .await?;
+
+        // Get total count
+        let total = self.hospital_repo.count_all(status_filter).await?;
+
+        // Calculate pagination metadata
+        let total_pages = (total as f64 / page_size as f64).ceil() as i64;
+
+        Ok(HospitalListResponse {
+            hospitals: hospitals.into_iter().map(HospitalSummary::from).collect(),
+            pagination: PaginationMetadata {
+                current_page: page,
+                page_size,
+                total_items: total,
+                total_pages,
+                has_next: page < total_pages,
+                has_previous: page > 1,
+            },
+        })
+    }
+}
+
+/// Response for listing hospitals
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct HospitalListResponse {
+    pub hospitals: Vec<HospitalSummary>,
+    pub pagination: PaginationMetadata,
+}
+
+/// Summary information for a hospital in list view
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct HospitalSummary {
+    pub id: Uuid,
+    pub name: String,
+    pub email: String,
+    pub phone_number: String,
+    pub registration_number: String,
+    pub status: Option<RegistrationStatus>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub approved_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl From<Hospital> for HospitalSummary {
+    fn from(hospital: Hospital) -> Self {
+        Self {
+            id: hospital.id,
+            name: hospital.name,
+            email: hospital.email,
+            phone_number: hospital.phone_number,
+            registration_number: hospital.registration_number,
+            status: hospital.admin_registration_status,
+            created_at: hospital.created_at,
+            approved_at: hospital.approved_at,
+        }
+    }
+}
+
+/// Pagination metadata
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PaginationMetadata {
+    pub current_page: i64,
+    pub page_size: i64,
+    pub total_items: i64,
+    pub total_pages: i64,
+    pub has_next: bool,
+    pub has_previous: bool,
 }
 
 /// Response type for registration status queries

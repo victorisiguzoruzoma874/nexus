@@ -179,6 +179,85 @@ impl HospitalRepository {
 
         Ok(hospitals)
     }
+
+    /// List all hospitals with optional status filter
+    /// Requirements: 4.2
+    pub async fn list_all(
+        &self,
+        status_filter: Option<RegistrationStatus>,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<Hospital>, RepositoryError> {
+        let hospitals = if let Some(status) = status_filter {
+            sqlx::query_as::<_, Hospital>(
+                r#"
+                SELECT 
+                    id, name, registration_number, email, address, phone_number,
+                    verification_status, registration_step,
+                    admin_registration_status, approved_by, approved_at, rejection_reason, admin_user_id,
+                    legal_submitted_at, setup_progress_percent, logo_url, created_at, updated_at
+                FROM hospitals
+                WHERE admin_registration_status = $1
+                ORDER BY created_at DESC
+                LIMIT $2 OFFSET $3
+                "#,
+            )
+            .bind(status)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query_as::<_, Hospital>(
+                r#"
+                SELECT 
+                    id, name, registration_number, email, address, phone_number,
+                    verification_status, registration_step,
+                    admin_registration_status, approved_by, approved_at, rejection_reason, admin_user_id,
+                    legal_submitted_at, setup_progress_percent, logo_url, created_at, updated_at
+                FROM hospitals
+                ORDER BY created_at DESC
+                LIMIT $1 OFFSET $2
+                "#,
+            )
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&self.pool)
+            .await?
+        };
+
+        Ok(hospitals)
+    }
+
+    /// Count total hospitals with optional status filter
+    pub async fn count_all(
+        &self,
+        status_filter: Option<RegistrationStatus>,
+    ) -> Result<i64, RepositoryError> {
+        let count = if let Some(status) = status_filter {
+            sqlx::query_scalar::<_, i64>(
+                r#"
+                SELECT COUNT(*)
+                FROM hospitals
+                WHERE admin_registration_status = $1
+                "#,
+            )
+            .bind(status)
+            .fetch_one(&self.pool)
+            .await?
+        } else {
+            sqlx::query_scalar::<_, i64>(
+                r#"
+                SELECT COUNT(*)
+                FROM hospitals
+                "#,
+            )
+            .fetch_one(&self.pool)
+            .await?
+        };
+
+        Ok(count)
+    }
 }
 
 #[cfg(test)]
