@@ -1,6 +1,6 @@
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     Json,
 };
 use uuid::Uuid;
@@ -11,7 +11,7 @@ use crate::{
     models::shift::{CreateShiftRequest, Shift},
     routes::AppState,
     services::shift_service::{self, ShiftServiceError},
-    utils::errors::{AppError, AppResult},
+    utils::{errors::{AppError, AppResult}, extract_claims},
 };
 
 /// Response for shift preview
@@ -69,14 +69,18 @@ impl From<shift_service::ShiftPreview> for ShiftPreviewResponse {
 )]
 pub async fn create_shift(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<CreateShiftRequest>,
 ) -> AppResult<(StatusCode, Json<Shift>)> {
     payload.validate().map_err(|e| AppError::Validation(e.to_string()))?;
 
-    // Extract hospital_id and user_id from state (mock for now)
-    // In production, these would come from JWT token
-    let hospital_id = Uuid::new_v4(); // TODO: Get from authenticated user
-    let created_by = Uuid::new_v4(); // TODO: Get from authenticated user
+    let claims = extract_claims(&headers)?;
+    let created_by = Uuid::parse_str(&claims.sub)
+        .map_err(|_| AppError::Unauthorized("Invalid user ID in token".to_string()))?;
+    let hospital_id = claims.hospital_id
+        .as_deref()
+        .and_then(|s| Uuid::parse_str(s).ok())
+        .ok_or_else(|| AppError::Forbidden("No hospital associated with this account".to_string()))?;
 
     match state.shift_service.create_shift(hospital_id, created_by, payload).await {
         Ok(shift) => Ok((StatusCode::CREATED, Json(shift))),

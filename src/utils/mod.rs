@@ -7,3 +7,5 @@ pub use config::AppConfig;
 pub use db::*;
 pub use errors::*;
 pub use validation::*;
+pub mod jwt;
+pub use jwt::extract_claims;

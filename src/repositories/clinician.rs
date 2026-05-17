@@ -92,7 +92,7 @@ impl ClinicianRepository {
         .execute(&self.pool)
         .await?;
 
-        sqlx::query(
+        let result = sqlx::query(
             r#"
             UPDATE clinicians
             SET first_name = $2, last_name = $3, clinician_role = $4,
@@ -109,6 +109,10 @@ impl ClinicianRepository {
         .bind(format!("{:?}", role))
         .execute(&self.pool)
         .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(ClinicianRepoError::NotFound);
+        }
 
         Ok(())
     }

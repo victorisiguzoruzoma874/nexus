@@ -59,7 +59,7 @@ impl ShiftRepository {
         // Calculate effective rate and grand total
         let (effective_rate, grand_total) = self.calculate_compensation(&request);
 
-        let shift = sqlx::query_as::<_, Shift>(
+        sqlx::query(
             r#"
             INSERT INTO shifts (
                 id, hospital_id, role_category, role_title, specialty, department,
@@ -75,19 +75,6 @@ impl ShiftRepository {
                 $11, $12, $13, $14, $15, $16, $17, $18, $19,
                 $20, $21, $22, $23, NOW(), NOW()
             )
-            RETURNING
-                s.id, s.hospital_id, h.name as hospital_name,
-                s.role_category, s.role_title, s.specialty, s.department,
-                s.shift_type, s.status, s.priority, s.urgency_bonus_pct,
-                s.scheduled_start, s.duration_hours, s.scheduled_end,
-                s.actual_start, s.actual_end, s.assigned_clinician_id,
-                s.rate_kobo_per_hour, s.fixed_rate_kobo, s.pay_type, s.stat_bonus_kobo,
-                s.effective_rate_kobo_per_hour, s.grand_total_kobo,
-                s.shift_label, s.job_description, s.draft_quality_score, s.notes,
-                s.created_by, s.broadcast_consent_confirmed, s.matched_clinicians_at_publish,
-                s.broadcast_at, s.billing_triggered_at, s.created_at, s.updated_at
-            FROM (SELECT * FROM shifts WHERE id = $1) s
-            LEFT JOIN hospitals h ON s.hospital_id = h.id
             "#,
         )
         .bind(id)
@@ -113,6 +100,18 @@ impl ShiftRepository {
         .bind(&request.notes)
         .bind(created_by)
         .bind(request.broadcast_consent_confirmed)
+        .execute(&mut **tx)
+        .await?;
+
+        let shift = sqlx::query_as::<_, Shift>(
+            r#"
+            SELECT s.*, h.name as hospital_name
+            FROM shifts s
+            LEFT JOIN hospitals h ON s.hospital_id = h.id
+            WHERE s.id = $1
+            "#,
+        )
+        .bind(id)
         .fetch_one(&mut **tx)
         .await?;
 

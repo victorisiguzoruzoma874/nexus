@@ -161,7 +161,11 @@ impl ClinicianRegistrationService {
                 &req.license_number,
                 &req.specialty,
             )
-            .await?;
+            .await
+            .map_err(|e| match e {
+                ClinicianRepoError::NotFound => ClinicianRegistrationError::NotFound,
+                other => ClinicianRegistrationError::Repository(other),
+            })?;
 
         let phone = self
             .repo
