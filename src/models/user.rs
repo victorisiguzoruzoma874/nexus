@@ -54,7 +54,7 @@ pub struct CreateUserRequest {
     #[validate(email(message = "A valid email address is required"))]
     pub email: String,
 
-    /// Optional E.164 phone number (e.g. +2348012345678) — required for phone OTP login
+    /// Optional E.164 phone number (e.g. +2348012345678) — not used for login
     pub phone: Option<String>,
 
     #[validate(length(min = 8, message = "Password must be at least 8 characters"))]
@@ -123,18 +123,18 @@ pub struct Claims {
     pub iat: usize,
 }
 
-/// Request to send a login OTP to a phone number (AC-01).
+/// Request to send a login OTP to an email address (AC-01).
 #[derive(Debug, Clone, Serialize, Deserialize, Validate, ToSchema)]
-pub struct PhoneLoginRequest {
-    #[validate(length(min = 7, max = 20, message = "Phone number is required"))]
-    pub phone: String,
+pub struct EmailLoginRequest {
+    #[validate(email(message = "A valid email address is required"))]
+    pub email: String,
 }
 
-/// Request to verify a phone OTP and complete login (AC-01).
+/// Request to verify an email OTP and complete login (AC-01).
 #[derive(Debug, Clone, Serialize, Deserialize, Validate, ToSchema)]
-pub struct OtpVerifyRequest {
-    #[validate(length(min = 7, max = 20, message = "Phone number is required"))]
-    pub phone: String,
+pub struct EmailOtpVerifyRequest {
+    #[validate(email(message = "A valid email address is required"))]
+    pub email: String,
     #[validate(length(equal = 6, message = "OTP must be 6 digits"))]
     pub code: String,
 }

@@ -7,8 +7,8 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::models::user::{Claims, LoginResponse, User, UserResponse, UserRole};
-use crate::services::notification_service::NotificationService;
-use crate::services::sms_service::{SmsError, SmsService};
+use crate::services::email_outbox_service::{EmailOutboxError, EmailOutboxService};
+use crate::services::email_templates;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AuthError {
@@ -22,8 +22,8 @@ pub enum AuthError {
     InvalidCredentials,
     #[error("Account is deactivated")]
     Deactivated,
-    #[error("SMS error: {0}")]
-    Sms(#[from] SmsError),
+    #[error("Email queue error: {0}")]
+    EmailQueue(#[from] EmailOutboxError),
     #[error("Database error: {0}")]
     Database(#[from] sqlx::Error),
     #[error("Internal error: {0}")]
@@ -32,23 +32,22 @@ pub enum AuthError {
 
 pub struct AuthService {
     pool: PgPool,
-    sms: Arc<SmsService>,
-    notification: Arc<NotificationService>,
+    email_outbox: Arc<EmailOutboxService>,
 }
 
 impl AuthService {
-    pub fn new(pool: PgPool, sms: Arc<SmsService>, notification: Arc<NotificationService>) -> Self {
-        Self { pool, sms, notification }
+    pub fn new(pool: PgPool, email_outbox: Arc<EmailOutboxService>) -> Self {
+        Self { pool, email_outbox }
     }
 
     // -----------------------------------------------------------------------
-    // AC-01: Phone OTP login — step 1: send OTP
+    // AC-01: Email OTP login — step 1: send OTP
     // -----------------------------------------------------------------------
-    pub async fn send_login_otp(&self, phone: &str) -> Result<(), AuthError> {
-        // Verify phone belongs to an active user
+    pub async fn send_login_otp(&self, email: &str) -> Result<(), AuthError> {
+        // Verify email belongs to an active user
         let exists: Option<(bool,)> =
-            sqlx::query_as("SELECT is_active FROM users WHERE phone = $1")
-                .bind(phone)
+            sqlx::query_as("SELECT is_active FROM users WHERE email = $1")
+                .bind(email)
                 .fetch_optional(&self.pool)
                 .await?;
 
@@ -61,33 +60,34 @@ impl AuthService {
         let expires_at = Utc::now() + Duration::minutes(10);
 
         sqlx::query(
-            "INSERT INTO login_otp_codes (phone, code, expires_at) VALUES ($1, $2, $3)",
+            "INSERT INTO login_email_otp_codes (email, code, expires_at) VALUES ($1, $2, $3)",
         )
-        .bind(phone)
+        .bind(email)
         .bind(&code)
         .bind(expires_at)
         .execute(&self.pool)
         .await?;
 
-        self.sms.send_otp(phone, &code).await?;
+        let content = email_templates::email_otp(&code, 10);
+        self.email_outbox.enqueue_email(email, &content).await?;
         Ok(())
     }
 
     // -----------------------------------------------------------------------
-    // AC-01: Phone OTP login — step 2: verify OTP and issue tokens
+    // AC-01: Email OTP login — step 2: verify OTP and issue tokens
     // -----------------------------------------------------------------------
     pub async fn verify_login_otp(
         &self,
-        phone: &str,
+        email: &str,
         code: &str,
     ) -> Result<LoginResponse, AuthError> {
         // Validate OTP
         let otp: Option<(Uuid, bool)> = sqlx::query_as(
-            "SELECT id, used FROM login_otp_codes
-             WHERE phone = $1 AND code = $2 AND expires_at > NOW()
+            "SELECT id, used FROM login_email_otp_codes
+             WHERE email = $1 AND code = $2 AND expires_at > NOW()
              ORDER BY created_at DESC LIMIT 1",
         )
-        .bind(phone)
+        .bind(email)
         .bind(code)
         .fetch_optional(&self.pool)
         .await?;
@@ -98,12 +98,12 @@ impl AuthService {
         }
 
         // Mark OTP used
-        sqlx::query("UPDATE login_otp_codes SET used = TRUE WHERE id = $1")
+        sqlx::query("UPDATE login_email_otp_codes SET used = TRUE WHERE id = $1")
             .bind(otp_id)
             .execute(&self.pool)
             .await?;
 
-        let user = self.fetch_user_by_phone(phone).await?;
+        let user = self.fetch_user_by_email(email).await?;
         self.complete_login(user).await
     }
 
@@ -169,14 +169,8 @@ impl AuthService {
             .unwrap_or_else(|_| "http://localhost:8080".to_string());
         let reset_link = format!("{}/reset-password?token={}", api_base, raw_token);
 
-        let _ = self.notification.send_email(
-            email,
-            "Reset your NexusCare password",
-            &format!(
-                "Click the link below to reset your password. It expires in 1 hour.\n\n{}\n\nIf you did not request this, ignore this email.",
-                reset_link
-            ),
-        ).await;
+        let content = email_templates::password_reset(&reset_link);
+        self.email_outbox.enqueue_email(email, &content).await?;
 
         Ok(())
     }
@@ -320,13 +314,13 @@ impl AuthService {
         Ok(raw)
     }
 
-    async fn fetch_user_by_phone(&self, phone: &str) -> Result<User, AuthError> {
+    async fn fetch_user_by_email(&self, email: &str) -> Result<User, AuthError> {
         sqlx::query_as(
             "SELECT id, hospital_id, first_name, last_name, email, phone, password_hash,
                     role, role_label, avatar_url, is_active, last_login_at, created_at, updated_at
-             FROM users WHERE phone = $1",
+             FROM users WHERE email = $1",
         )
-        .bind(phone)
+        .bind(email)
         .fetch_optional(&self.pool)
         .await?
         .ok_or(AuthError::NotFound)

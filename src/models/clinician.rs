@@ -3,6 +3,9 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
 use validator::Validate;
+use utoipa::ToSchema;
+
+use crate::models::clinician_registration::ClinicianRole;
 
 // ---------------------------------------------------------------------------
 // Enums
@@ -128,4 +131,23 @@ pub struct UpdateClinicianAvailabilityRequest {
     pub available_from: Option<DateTime<Utc>>,
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
+}
+
+// ---------------------------------------------------------------------------
+// Admin response types
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
+pub struct ClinicianAdminSummary {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub first_name: String,
+    pub last_name: String,
+    pub email: String,
+    pub license_number: String,
+    pub role: ClinicianRole,
+    pub specialty: ClinicalSpecialty,
+    pub is_verified: bool,
+    pub is_active: bool,
+    pub created_at: DateTime<Utc>,
 }

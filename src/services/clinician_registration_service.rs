@@ -9,20 +9,21 @@ use crate::models::clinician_registration::{
 };
 use crate::repositories::clinician::{ClinicianRepoError, ClinicianRepository};
 use crate::services::paystack::{PaystackClient, PaystackError};
-use crate::services::sms_service::{SmsError, SmsService};
 use crate::services::encryption::EncryptionService;
-use crate::utils::validation::validate_phone_e164;
+use crate::services::email_outbox_service::{EmailOutboxError, EmailOutboxService};
+use crate::services::email_templates;
+use crate::utils::validation::validate_email_rfc5322;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClinicianRegistrationError {
-    #[error("Phone number already registered")]
-    DuplicatePhone,
+    #[error("Email already registered")]
+    DuplicateEmail,
     #[error("Invalid or expired OTP")]
     InvalidOtp,
     #[error("Validation error: {0}")]
     Validation(String),
-    #[error("SMS error: {0}")]
-    Sms(#[from] SmsError),
+    #[error("Email queue error: {0}")]
+    EmailQueue(#[from] EmailOutboxError),
     #[error("Payment error: {0}")]
     Payment(#[from] PaystackError),
     #[error("Database error: {0}")]
@@ -37,7 +38,7 @@ pub enum ClinicianRegistrationError {
 
 pub struct ClinicianRegistrationService {
     repo: Arc<ClinicianRepository>,
-    sms: Arc<SmsService>,
+    email_outbox: Arc<EmailOutboxService>,
     paystack: Arc<PaystackClient>,
     encryption: Arc<EncryptionService>,
     pool: PgPool,
@@ -46,12 +47,12 @@ pub struct ClinicianRegistrationService {
 impl ClinicianRegistrationService {
     pub fn new(
         repo: Arc<ClinicianRepository>,
-        sms: Arc<SmsService>,
+        email_outbox: Arc<EmailOutboxService>,
         paystack: Arc<PaystackClient>,
         encryption: Arc<EncryptionService>,
         pool: PgPool,
     ) -> Self {
-        Self { repo, sms, paystack, encryption, pool }
+        Self { repo, email_outbox, paystack, encryption, pool }
     }
 
     // -----------------------------------------------------------------------
@@ -59,14 +60,14 @@ impl ClinicianRegistrationService {
     // -----------------------------------------------------------------------
     pub async fn send_otp(
         &self,
-        phone: &str,
+        email: &str,
     ) -> Result<SendOtpResponse, ClinicianRegistrationError> {
-        validate_phone_e164(phone)
+        validate_email_rfc5322(email)
             .map_err(|e| ClinicianRegistrationError::Validation(e.to_string()))?;
 
         // AC-05: Duplicate prevention
-        if self.repo.phone_exists(phone).await? {
-            return Err(ClinicianRegistrationError::DuplicatePhone);
+        if self.repo.email_exists(email).await? {
+            return Err(ClinicianRegistrationError::DuplicateEmail);
         }
 
         let code = generate_otp();
@@ -74,15 +75,16 @@ impl ClinicianRegistrationService {
 
         // Persist OTP
         sqlx::query(
-            "INSERT INTO otp_codes (phone, code, expires_at) VALUES ($1, $2, $3)",
+            "INSERT INTO clinician_email_otp_codes (email, code, expires_at) VALUES ($1, $2, $3)",
         )
-        .bind(phone)
+        .bind(email)
         .bind(&code)
         .bind(expires_at)
         .execute(&self.pool)
         .await?;
 
-        self.sms.send_otp(phone, &code).await?;
+        let content = email_templates::email_otp(&code, 10);
+        self.email_outbox.enqueue_email(email, &content).await?;
 
         Ok(SendOtpResponse {
             message: "OTP sent successfully".to_string(),
@@ -94,19 +96,19 @@ impl ClinicianRegistrationService {
     // -----------------------------------------------------------------------
     pub async fn verify_otp(
         &self,
-        phone: &str,
+        email: &str,
         otp: &str,
     ) -> Result<VerifyOtpResponse, ClinicianRegistrationError> {
-        // Fetch the latest unused, non-expired OTP for this phone
+        // Fetch the latest unused, non-expired OTP for this email
         let row: Option<(Uuid,)> = sqlx::query_as(
             r#"
-            SELECT id FROM otp_codes
-            WHERE phone = $1 AND code = $2 AND used = FALSE AND expires_at > NOW()
+            SELECT id FROM clinician_email_otp_codes
+            WHERE email = $1 AND code = $2 AND used = FALSE AND expires_at > NOW()
             ORDER BY created_at DESC
             LIMIT 1
             "#,
         )
-        .bind(phone)
+        .bind(email)
         .bind(otp)
         .fetch_optional(&self.pool)
         .await?;
@@ -114,17 +116,20 @@ impl ClinicianRegistrationService {
         let otp_id = row.map(|(id,)| id).ok_or(ClinicianRegistrationError::InvalidOtp)?;
 
         // Mark OTP as used
-        sqlx::query("UPDATE otp_codes SET used = TRUE WHERE id = $1")
+        sqlx::query("UPDATE clinician_email_otp_codes SET used = TRUE WHERE id = $1")
             .bind(otp_id)
             .execute(&self.pool)
             .await?;
 
         // Create user + clinician in a transaction
         let mut tx = self.pool.begin().await?;
-        let clinician_id = self.repo.create_clinician(&mut tx, phone).await?;
+        let clinician_id = self.repo.create_clinician(&mut tx, email).await?;
         tx.commit().await?;
 
         let token = issue_jwt(clinician_id);
+
+        let content = email_templates::clinician_welcome(None);
+        self.email_outbox.enqueue_email(email, &content).await?;
 
         Ok(VerifyOtpResponse {
             clinician_id,
@@ -167,9 +172,9 @@ impl ClinicianRegistrationService {
                 other => ClinicianRegistrationError::Repository(other),
             })?;
 
-        let phone = self
+        let email = self
             .repo
-            .find_phone_by_clinician_id(clinician_id)
+            .find_email_by_clinician_id(clinician_id)
             .await?
             .unwrap_or_default();
 
@@ -179,7 +184,7 @@ impl ClinicianRegistrationService {
             last_name: req.last_name,
             role: req.role,
             license_number: req.license_number,
-            phone,
+            email,
         })
     }
 

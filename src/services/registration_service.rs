@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use chrono::Utc;
 use sqlx::PgPool;
 use uuid::Uuid;
 use serde::{Deserialize, Serialize};
@@ -10,7 +11,8 @@ use crate::models::registration::RegistrationStatus;
 use crate::repositories::hospital::{HospitalRepository, RepositoryError};
 use crate::services::audit_service::{AuditService, AuditServiceError, RegistrationDetails};
 use crate::services::location_service::{LocationService, LocationServiceError};
-use crate::services::notification_service::{NotificationService, NotificationError};
+use crate::services::email_outbox_service::EmailOutboxService;
+use crate::services::email_templates;
 use crate::services::payment_service::{PaymentService, PaymentServiceError};
 use crate::utils::validation::{validate_email_rfc5322, validate_phone_e164};
 
@@ -43,9 +45,6 @@ pub enum RegistrationError {
     #[error("Audit service error: {0}")]
     AuditError(#[from] AuditServiceError),
     
-    #[error("Notification service error: {0}")]
-    NotificationError(#[from] NotificationError),
-    
     #[error("External service error: {0}")]
     ExternalServiceError(String),
 }
@@ -66,7 +65,7 @@ pub struct RegistrationService {
     location_service: Arc<LocationService>,
     payment_service: Arc<PaymentService>,
     audit_service: Arc<AuditService>,
-    notification_service: Arc<NotificationService>,
+    email_outbox: Arc<EmailOutboxService>,
     db_pool: PgPool,
 }
 
@@ -76,7 +75,7 @@ impl RegistrationService {
         location_service: Arc<LocationService>,
         payment_service: Arc<PaymentService>,
         audit_service: Arc<AuditService>,
-        notification_service: Arc<NotificationService>,
+        email_outbox: Arc<EmailOutboxService>,
         db_pool: PgPool,
     ) -> Self {
         Self {
@@ -84,7 +83,7 @@ impl RegistrationService {
             location_service,
             payment_service,
             audit_service,
-            notification_service,
+            email_outbox,
             db_pool,
         }
     }
@@ -154,6 +153,17 @@ impl RegistrationService {
             eprintln!("Warning: Failed to log registration audit: {}", e);
         }
 
+        if let Err(e) = self
+            .email_outbox
+            .enqueue_email(
+                &request.email,
+                &email_templates::hospital_registration_submitted(&request.hospital_name),
+            )
+            .await
+        {
+            eprintln!("Warning: Failed to queue registration email: {}", e);
+        }
+
         Ok(HospitalRegistrationResult {
             hospital_id,
             status: RegistrationStatus::Pending,
@@ -161,7 +171,7 @@ impl RegistrationService {
             next_steps: vec![
                 "Upload required documents (license, accreditation)".to_string(),
                 "Wait for system administrator review".to_string(),
-                "You will receive email and push notifications upon approval".to_string(),
+                "You will receive an email notification upon approval".to_string(),
             ],
         })
     }
@@ -261,7 +271,7 @@ impl RegistrationService {
     /// This method:
     /// 1. Updates hospital status to 'approved'
     /// 2. Logs status change in audit trail
-    /// 3. Sends approval notifications (email + push)
+    /// 3. Queues approval notification email
     /// 4. Prevents concurrent approvals using database transaction
     pub async fn approve_hospital(
         &self,
@@ -311,11 +321,14 @@ impl RegistrationService {
         }
 
         if let Err(e) = self
-            .notification_service
-            .send_approval_notification(hospital_id, hospital.name.clone(), hospital.email.clone())
+            .email_outbox
+            .enqueue_email(
+                &hospital.email,
+                &email_templates::hospital_registration_approved(&hospital.name, Utc::now()),
+            )
             .await
         {
-            eprintln!("Warning: Failed to send approval notification: {}", e);
+            eprintln!("Warning: Failed to queue approval email: {}", e);
         }
 
         Ok(())
@@ -325,7 +338,7 @@ impl RegistrationService {
     /// Reject a hospital registration
     /// 
     /// Updates hospital status to rejected with reason, logs the change in audit trail,
-    /// and sends rejection notifications. Validates rejection reason length (10-500 chars).
+    /// and queues a rejection email. Validates rejection reason length (10-500 chars).
     /// 
     /// Requirements: 4.1, 4.2, 4.3, 4.4, 4.5
     pub async fn reject_hospital(
@@ -388,11 +401,14 @@ impl RegistrationService {
         }
 
         if let Err(e) = self
-            .notification_service
-            .send_rejection_notification(hospital_id, hospital.name.clone(), hospital.email.clone(), reason)
+            .email_outbox
+            .enqueue_email(
+                &hospital.email,
+                &email_templates::hospital_registration_rejected(&hospital.name, &reason),
+            )
             .await
         {
-            eprintln!("Warning: Failed to send rejection notification: {}", e);
+            eprintln!("Warning: Failed to queue rejection email: {}", e);
         }
 
         Ok(())

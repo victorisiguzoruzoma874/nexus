@@ -2,14 +2,14 @@ use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::models::clinician_registration::{ClinicianBankAccount, ClinicianRole};
-use crate::models::clinician::ClinicalSpecialty;
+use crate::models::clinician::{ClinicalSpecialty, ClinicianAdminSummary};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClinicianRepoError {
     #[error("Database error: {0}")]
     Database(#[from] sqlx::Error),
-    #[error("Phone already registered")]
-    DuplicatePhone,
+    #[error("Email already registered")]
+    DuplicateEmail,
     #[error("Clinician not found")]
     NotFound,
 }
@@ -23,11 +23,11 @@ impl ClinicianRepository {
         Self { pool }
     }
 
-    /// AC-05: Check if phone is already registered
-    pub async fn phone_exists(&self, phone: &str) -> Result<bool, ClinicianRepoError> {
+    /// AC-05: Check if email is already registered
+    pub async fn email_exists(&self, email: &str) -> Result<bool, ClinicianRepoError> {
         let row: Option<(i64,)> =
-            sqlx::query_as("SELECT COUNT(*) FROM clinicians WHERE phone = $1")
-                .bind(phone)
+            sqlx::query_as("SELECT COUNT(*) FROM users WHERE email = $1")
+                .bind(email)
                 .fetch_optional(&self.pool)
                 .await?;
         Ok(row.map(|(c,)| c > 0).unwrap_or(false))
@@ -37,9 +37,9 @@ impl ClinicianRepository {
     pub async fn create_clinician(
         &self,
         tx: &mut Transaction<'_, Postgres>,
-        phone: &str,
+        email: &str,
     ) -> Result<Uuid, ClinicianRepoError> {
-        // Create a minimal user row (no email/password — phone-only auth)
+        // Create a minimal user row (email-only auth)
         let user_id: Uuid = sqlx::query_scalar(
             r#"
             INSERT INTO users (id, first_name, last_name, email, password_hash, role)
@@ -47,20 +47,19 @@ impl ClinicianRepository {
             RETURNING id
             "#,
         )
-        .bind(phone) // use phone as placeholder email (unique)
+        .bind(email)
         .fetch_one(&mut **tx)
         .await?;
 
         // Create clinician row linked to user
         let clinician_id: Uuid = sqlx::query_scalar(
             r#"
-            INSERT INTO clinicians (id, user_id, first_name, last_name, specialty, role_title, phone)
-            VALUES (gen_random_uuid(), $1, '', '', 'other', '', $2)
+            INSERT INTO clinicians (id, user_id, first_name, last_name, specialty, role_title)
+            VALUES (gen_random_uuid(), $1, '', '', 'other', '')
             RETURNING id
             "#,
         )
         .bind(user_id)
-        .bind(phone)
         .fetch_one(&mut **tx)
         .await?;
 
@@ -162,29 +161,70 @@ impl ClinicianRepository {
         Ok(row)
     }
 
-    /// Get clinician_id for a given phone (used after OTP verify)
-    pub async fn find_clinician_id_by_phone(
-        &self,
-        phone: &str,
-    ) -> Result<Option<Uuid>, ClinicianRepoError> {
-        let row: Option<(Uuid,)> =
-            sqlx::query_as("SELECT id FROM clinicians WHERE phone = $1")
-                .bind(phone)
-                .fetch_optional(&self.pool)
-                .await?;
-        Ok(row.map(|(id,)| id))
-    }
-
-    /// Get phone for a given clinician_id
-    pub async fn find_phone_by_clinician_id(
+    /// Get email for a given clinician_id
+    pub async fn find_email_by_clinician_id(
         &self,
         clinician_id: Uuid,
     ) -> Result<Option<String>, ClinicianRepoError> {
-        let row: Option<(String,)> =
-            sqlx::query_as("SELECT COALESCE(phone, '') FROM clinicians WHERE id = $1")
-                .bind(clinician_id)
-                .fetch_optional(&self.pool)
-                .await?;
-        Ok(row.map(|(p,)| p))
+        let row: Option<(String,)> = sqlx::query_as(
+            r#"
+            SELECT u.email
+            FROM clinicians c
+            JOIN users u ON c.user_id = u.id
+            WHERE c.id = $1
+            "#,
+        )
+        .bind(clinician_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|(email,)| email))
+    }
+
+    pub async fn list_completed_clinicians(
+        &self,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<ClinicianAdminSummary>, ClinicianRepoError> {
+        let rows = sqlx::query_as::<_, ClinicianAdminSummary>(
+            r#"
+            SELECT c.id, c.user_id, c.first_name, c.last_name, u.email,
+                   c.license_number, c.clinician_role as role, c.specialty,
+                   c.is_verified, c.is_active, c.created_at
+            FROM clinicians c
+            JOIN users u ON c.user_id = u.id
+            WHERE c.first_name <> ''
+              AND c.last_name <> ''
+              AND c.license_number IS NOT NULL
+              AND c.license_number <> ''
+              AND c.clinician_role IS NOT NULL
+            ORDER BY c.created_at DESC
+            LIMIT $1 OFFSET $2
+            "#,
+        )
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows)
+    }
+
+    pub async fn count_completed_clinicians(&self) -> Result<i64, ClinicianRepoError> {
+        let count = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*)
+            FROM clinicians c
+            WHERE c.first_name <> ''
+              AND c.last_name <> ''
+              AND c.license_number IS NOT NULL
+              AND c.license_number <> ''
+              AND c.clinician_role IS NOT NULL
+            "#,
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(count)
     }
 }

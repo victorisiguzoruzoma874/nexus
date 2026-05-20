@@ -11,13 +11,13 @@ use tower_http::{
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
-use crate::handlers::{auth, health, hospitals, registration, clinician_registration, shifts};
+use crate::handlers::{admin, auth, health, hospitals, registration, clinician_registration, shifts};
 use crate::repositories::{
     audit::AuditRepository,
     billing::BillingRepository,
+    clinician::ClinicianRepository,
     hospital::HospitalRepository,
     location::LocationRepository,
-    clinician::ClinicianRepository,
     shift::ShiftRepository,
 };
 use crate::services::{
@@ -27,10 +27,10 @@ use crate::services::{
     geocoding::GeocodingClient,
     location_service::LocationService,
     notification_service::NotificationService,
+    email_outbox_service::EmailOutboxService,
     payment_service::PaymentService,
     paystack::PaystackClient,
     registration_service::RegistrationService,
-    sms_service::SmsService,
     clinician_registration_service::ClinicianRegistrationService,
     shift_service::ShiftService,
 };
@@ -43,6 +43,7 @@ pub struct AppState {
     pub clinician_registration_service: Arc<ClinicianRegistrationService>,
     pub auth_service: Arc<AuthService>,
     pub shift_service: Arc<ShiftService>,
+    pub clinician_repo: Arc<ClinicianRepository>,
 }
 
 /// API Documentation
@@ -55,8 +56,8 @@ pub struct AppState {
         // Auth
         crate::handlers::auth::register,
         crate::handlers::auth::login,
-        crate::handlers::auth::phone_otp_send,
-        crate::handlers::auth::phone_otp_verify,
+        crate::handlers::auth::email_otp_send,
+        crate::handlers::auth::email_otp_verify,
         crate::handlers::auth::forgot_password,
         crate::handlers::auth::reset_password,
         crate::handlers::auth::refresh_token,
@@ -74,8 +75,18 @@ pub struct AppState {
         crate::handlers::clinician_registration::add_bank_account,
         // Shifts
         crate::handlers::shifts::create_shift,
+        crate::handlers::shifts::list_shifts,
         crate::handlers::shifts::preview_shift,
         crate::handlers::shifts::get_shift,
+        crate::handlers::shifts::express_interest,
+        crate::handlers::shifts::apply_for_shift,
+        crate::handlers::shifts::list_shift_applications,
+        crate::handlers::shifts::assign_shift,
+        crate::handlers::shifts::cancel_shift,
+        crate::handlers::shifts::reschedule_shift,
+        // Admin
+        crate::handlers::admin::list_hospitals_admin,
+        crate::handlers::admin::list_clinicians_admin,
     ),
     components(
         schemas(
@@ -89,6 +100,13 @@ pub struct AppState {
             // Shifts
             crate::handlers::shifts::ShiftPreviewResponse,
             crate::handlers::shifts::ErrorResponse,
+            crate::handlers::shifts::ShiftListResponse,
+            crate::handlers::shifts::ShiftApplicationsResponse,
+            crate::handlers::shifts::PaginationMetadata,
+            // Admin
+            crate::handlers::admin::ClinicianListResponse,
+            crate::handlers::admin::PaginationMetadata,
+            crate::handlers::admin::ListCliniciansQuery,
             // Models
             crate::models::admin_registration::HospitalRegistrationRequest,
             crate::models::admin_registration::Address,
@@ -101,12 +119,21 @@ pub struct AppState {
             crate::models::shift::ShiftType,
             crate::models::shift::RoleCategory,
             crate::models::shift::PayType,
+            crate::models::shift::ShiftApplication,
+            crate::models::shift::ShiftApplicationRequest,
+            crate::models::shift::ShiftApplicationStatus,
+            crate::models::shift::ShiftApplicationsQuery,
+            crate::models::shift::ShiftListQuery,
+            crate::models::shift::ShiftInterestRequest,
+            crate::models::shift::ShiftAssignRequest,
+            crate::models::shift::ShiftCancelRequest,
+            crate::models::shift::ShiftRescheduleRequest,
             crate::models::user::UserResponse,
             crate::models::user::CreateUserRequest,
             crate::models::user::LoginRequest,
             crate::models::user::LoginResponse,
-            crate::models::user::PhoneLoginRequest,
-            crate::models::user::OtpVerifyRequest,
+            crate::models::user::EmailLoginRequest,
+            crate::models::user::EmailOtpVerifyRequest,
             crate::models::user::ForgotPasswordRequest,
             crate::models::user::ResetPasswordRequest,
             crate::models::user::RefreshTokenRequest,
@@ -119,6 +146,7 @@ pub struct AppState {
             crate::models::clinician_registration::ProfileResponse,
             crate::models::clinician_registration::AddBankAccountRequest,
             crate::models::clinician_registration::BankAccountResponse,
+            crate::models::clinician::ClinicianAdminSummary,
             // Services
             crate::services::registration_service::RegistrationStatusResponse,
             crate::services::registration_service::HospitalListResponse,
@@ -150,7 +178,11 @@ pub struct AppState {
 )]
 struct ApiDoc;
 
-pub fn create_router(pool: PgPool) -> Router {
+pub fn create_router(
+    pool: PgPool,
+    notification_service: Arc<NotificationService>,
+    email_outbox_service: Arc<EmailOutboxService>,
+) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
@@ -198,37 +230,35 @@ pub fn create_router(pool: PgPool) -> Router {
 
     let audit_service = Arc::new(AuditService::new(audit_repo));
 
-    let notification_service = Arc::new(NotificationService::new());
-
     // Initialize registration service
     let registration_service = Arc::new(RegistrationService::new(
         hospital_repo,
         location_service,
         payment_service,
         audit_service,
-        notification_service.clone(),
+        email_outbox_service.clone(),
         pool.clone(),
     ));
 
     // Initialize clinician registration service
-    let sms_service = Arc::new(SmsService::new(
-        std::env::var("TERMII_API_KEY").unwrap_or_else(|_| "mock".to_string()),
-        std::env::var("TERMII_API_URL").ok(),
-    ));
-
     let clinician_registration_service = Arc::new(ClinicianRegistrationService::new(
-        clinician_repo,
-        sms_service.clone(),
+        clinician_repo.clone(),
+        email_outbox_service.clone(),
         paystack_client.clone(),
         encryption_service.clone(),
         pool.clone(),
     ));
 
     // Initialize auth service
-    let auth_service = Arc::new(AuthService::new(pool.clone(), sms_service, notification_service.clone()));
+    let auth_service = Arc::new(AuthService::new(pool.clone(), email_outbox_service.clone()));
 
     // Initialize shift service
-    let shift_service = Arc::new(ShiftService::new(shift_repo, pool.clone(), notification_service.clone()));
+    let shift_service = Arc::new(ShiftService::new(
+        shift_repo,
+        pool.clone(),
+        notification_service.clone(),
+        email_outbox_service.clone(),
+    ));
 
     // Create shared state
     let state = AppState {
@@ -237,6 +267,7 @@ pub fn create_router(pool: PgPool) -> Router {
         clinician_registration_service,
         auth_service,
         shift_service,
+        clinician_repo: clinician_repo.clone(),
     };
 
     // Create API routes
@@ -247,8 +278,8 @@ pub fn create_router(pool: PgPool) -> Router {
         // Auth
         .route("/api/v1/auth/register", post(auth::register))
         .route("/api/v1/auth/login", post(auth::login))
-        .route("/api/v1/auth/otp/send", post(auth::phone_otp_send))
-        .route("/api/v1/auth/otp/verify", post(auth::phone_otp_verify))
+        .route("/api/v1/auth/otp/send", post(auth::email_otp_send))
+        .route("/api/v1/auth/otp/verify", post(auth::email_otp_verify))
         .route("/api/v1/auth/forgot-password", post(auth::forgot_password))
         .route("/api/v1/auth/reset-password", post(auth::reset_password))
         .route("/api/v1/auth/refresh", post(auth::refresh_token))
@@ -274,6 +305,14 @@ pub fn create_router(pool: PgPool) -> Router {
         .route(
             "/api/v1/admin/hospitals/{hospital_id}/reject",
             post(registration::reject_hospital),
+        )
+        .route(
+            "/api/v1/admin/hospitals",
+            get(admin::list_hospitals_admin),
+        )
+        .route(
+            "/api/v1/admin/clinicians",
+            get(admin::list_clinicians_admin),
         )
         // Existing Hospitals endpoints (legacy - for backward compatibility)
         .route("/api/v1/hospitals/create", post(hospitals::create_hospital))
@@ -302,8 +341,33 @@ pub fn create_router(pool: PgPool) -> Router {
         )
         // Shifts
         .route("/api/v1/shifts", post(shifts::create_shift))
+        .route("/api/v1/shifts", get(shifts::list_shifts))
         .route("/api/v1/shifts/preview", post(shifts::preview_shift))
         .route("/api/v1/shifts/{shift_id}", get(shifts::get_shift))
+        .route(
+            "/api/v1/shifts/{shift_id}/interest",
+            post(shifts::express_interest),
+        )
+        .route(
+            "/api/v1/shifts/{shift_id}/apply",
+            post(shifts::apply_for_shift),
+        )
+        .route(
+            "/api/v1/shifts/{shift_id}/applications",
+            get(shifts::list_shift_applications),
+        )
+        .route(
+            "/api/v1/shifts/{shift_id}/assign",
+            post(shifts::assign_shift),
+        )
+        .route(
+            "/api/v1/shifts/{shift_id}/cancel",
+            post(shifts::cancel_shift),
+        )
+        .route(
+            "/api/v1/shifts/{shift_id}/reschedule",
+            post(shifts::reschedule_shift),
+        )
         .layer(TraceLayer::new_for_http())
         .layer(cors)
         .with_state(state);
