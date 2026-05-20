@@ -8,7 +8,11 @@ use validator::Validate;
 use utoipa::ToSchema;
 
 use crate::{
-    models::shift::{CreateShiftRequest, Shift},
+    models::shift::{
+        CreateShiftRequest, Shift, ShiftApplication, ShiftApplicationRequest,
+        ShiftApplicationsQuery, ShiftAssignRequest, ShiftCancelRequest,
+        ShiftInterestRequest, ShiftListQuery, ShiftRescheduleRequest,
+    },
     routes::AppState,
     services::shift_service::{self, ShiftServiceError},
     utils::{errors::{AppError, AppResult}, extract_claims},
@@ -29,6 +33,28 @@ pub struct ShiftPreviewResponse {
     pub grand_total_kobo: i64,
     pub virtual_link: Option<String>,
     pub estimated_matches: i32,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize, ToSchema)]
+pub struct PaginationMetadata {
+    pub current_page: i64,
+    pub page_size: i64,
+    pub total_items: i64,
+    pub total_pages: i64,
+    pub has_next: bool,
+    pub has_previous: bool,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize, ToSchema)]
+pub struct ShiftListResponse {
+    pub shifts: Vec<Shift>,
+    pub pagination: PaginationMetadata,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize, ToSchema)]
+pub struct ShiftApplicationsResponse {
+    pub applications: Vec<ShiftApplication>,
+    pub pagination: PaginationMetadata,
 }
 
 impl From<shift_service::ShiftPreview> for ShiftPreviewResponse {
@@ -88,6 +114,51 @@ pub async fn create_shift(
     }
 }
 
+/// GET /api/v1/shifts
+#[utoipa::path(
+    get,
+    path = "/api/v1/shifts",
+    params(
+        ("status" = Option<crate::models::shift::ShiftStatus>, Query, description = "Optional status filter"),
+        ("page" = Option<i64>, Query, description = "Page number"),
+        ("page_size" = Option<i64>, Query, description = "Page size"),
+    ),
+    responses(
+        (status = 200, description = "Shifts retrieved", body = ShiftListResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    ),
+    tag = "shifts",
+    summary = "List shifts",
+    description = "List shifts with optional status filter and pagination"
+)]
+pub async fn list_shifts(
+    State(state): State<AppState>,
+    Query(query): Query<ShiftListQuery>,
+) -> AppResult<Json<ShiftListResponse>> {
+    let page = query.page.unwrap_or(1).max(1);
+    let page_size = query.page_size.unwrap_or(20).clamp(1, 100);
+
+    let (shifts, total) = state
+        .shift_service
+        .list_shifts(query.status, page, page_size)
+        .await
+        .map_err(map_shift_error)?;
+
+    let total_pages = (total as f64 / page_size as f64).ceil() as i64;
+
+    Ok(Json(ShiftListResponse {
+        shifts,
+        pagination: PaginationMetadata {
+            current_page: page,
+            page_size,
+            total_items: total,
+            total_pages,
+            has_next: page < total_pages,
+            has_previous: page > 1,
+        },
+    }))
+}
+
 /// POST /api/v1/shifts/preview
 /// AC-06: Preview shift before publishing
 #[utoipa::path(
@@ -142,6 +213,220 @@ pub async fn get_shift(
     }
 }
 
+/// POST /api/v1/shifts/{shift_id}/interest
+#[utoipa::path(
+    post,
+    path = "/api/v1/shifts/{shift_id}/interest",
+    request_body = ShiftInterestRequest,
+    params(
+        ("shift_id" = Uuid, Path, description = "Shift unique identifier")
+    ),
+    responses(
+        (status = 201, description = "Interest recorded"),
+        (status = 404, description = "Shift not found", body = ErrorResponse),
+        (status = 409, description = "Interest already exists", body = ErrorResponse),
+        (status = 422, description = "Validation error", body = ErrorResponse)
+    ),
+    tag = "shifts",
+    summary = "Express interest in a shift",
+    description = "Clinician expresses interest in an open shift"
+)]
+pub async fn express_interest(
+    State(state): State<AppState>,
+    Path(shift_id): Path<Uuid>,
+    Json(payload): Json<ShiftInterestRequest>,
+) -> AppResult<StatusCode> {
+    payload.validate().map_err(|e| AppError::Validation(e.to_string()))?;
+
+    state
+        .shift_service
+        .express_interest(shift_id, payload.clinician_id)
+        .await
+        .map(|_| StatusCode::CREATED)
+        .map_err(map_shift_error)
+}
+
+/// POST /api/v1/shifts/{shift_id}/apply
+#[utoipa::path(
+    post,
+    path = "/api/v1/shifts/{shift_id}/apply",
+    request_body = ShiftApplicationRequest,
+    params(
+        ("shift_id" = Uuid, Path, description = "Shift unique identifier")
+    ),
+    responses(
+        (status = 201, description = "Application submitted"),
+        (status = 403, description = "Profile incomplete or not allowed", body = ErrorResponse),
+        (status = 404, description = "Shift not found", body = ErrorResponse),
+        (status = 409, description = "Already applied or busy", body = ErrorResponse),
+        (status = 422, description = "Validation error", body = ErrorResponse)
+    ),
+    tag = "shifts",
+    summary = "Apply for a shift",
+    description = "Submit a shift application with profile details and experience"
+)]
+pub async fn apply_for_shift(
+    State(state): State<AppState>,
+    Path(shift_id): Path<Uuid>,
+    Json(payload): Json<ShiftApplicationRequest>,
+) -> AppResult<StatusCode> {
+    payload.validate().map_err(|e| AppError::Validation(e.to_string()))?;
+
+    state
+        .shift_service
+        .apply_for_shift(shift_id, payload)
+        .await
+        .map(|_| StatusCode::CREATED)
+        .map_err(map_shift_error)
+}
+
+/// GET /api/v1/shifts/{shift_id}/applications
+#[utoipa::path(
+    get,
+    path = "/api/v1/shifts/{shift_id}/applications",
+    params(
+        ("shift_id" = Uuid, Path, description = "Shift unique identifier"),
+        ("requester_user_id" = Uuid, Query, description = "User ID of the requester"),
+        ("page" = Option<i64>, Query, description = "Page number"),
+        ("page_size" = Option<i64>, Query, description = "Page size"),
+    ),
+    responses(
+        (status = 200, description = "Applications retrieved", body = ShiftApplicationsResponse),
+        (status = 403, description = "Not authorized", body = ErrorResponse),
+        (status = 404, description = "Shift not found", body = ErrorResponse)
+    ),
+    tag = "shifts",
+    summary = "List shift applications",
+    description = "List applications for a shift (only shift creator can view)"
+)]
+pub async fn list_shift_applications(
+    State(state): State<AppState>,
+    Path(shift_id): Path<Uuid>,
+    Query(query): Query<ShiftApplicationsQuery>,
+) -> AppResult<Json<ShiftApplicationsResponse>> {
+    let page = query.page.unwrap_or(1).max(1);
+    let page_size = query.page_size.unwrap_or(20).clamp(1, 100);
+
+    let (applications, total) = state
+        .shift_service
+        .list_applications_for_shift(shift_id, query.requester_user_id, page, page_size)
+        .await
+        .map_err(map_shift_error)?;
+
+    let total_pages = (total as f64 / page_size as f64).ceil() as i64;
+
+    Ok(Json(ShiftApplicationsResponse {
+        applications,
+        pagination: PaginationMetadata {
+            current_page: page,
+            page_size,
+            total_items: total,
+            total_pages,
+            has_next: page < total_pages,
+            has_previous: page > 1,
+        },
+    }))
+}
+
+/// POST /api/v1/shifts/{shift_id}/assign
+#[utoipa::path(
+    post,
+    path = "/api/v1/shifts/{shift_id}/assign",
+    request_body = ShiftAssignRequest,
+    params(
+        ("shift_id" = Uuid, Path, description = "Shift unique identifier")
+    ),
+    responses(
+        (status = 204, description = "Shift assigned"),
+        (status = 404, description = "Shift not found", body = ErrorResponse),
+        (status = 409, description = "Shift already assigned", body = ErrorResponse),
+        (status = 422, description = "Validation error", body = ErrorResponse)
+    ),
+    tag = "shifts",
+    summary = "Assign a clinician to a shift",
+    description = "Hospital assigns a clinician to an open shift"
+)]
+pub async fn assign_shift(
+    State(state): State<AppState>,
+    Path(shift_id): Path<Uuid>,
+    Json(payload): Json<ShiftAssignRequest>,
+) -> AppResult<StatusCode> {
+    payload.validate().map_err(|e| AppError::Validation(e.to_string()))?;
+
+    state
+        .shift_service
+        .assign_shift(shift_id, payload.clinician_id)
+        .await
+        .map(|_| StatusCode::NO_CONTENT)
+        .map_err(map_shift_error)
+}
+
+/// POST /api/v1/shifts/{shift_id}/cancel
+#[utoipa::path(
+    post,
+    path = "/api/v1/shifts/{shift_id}/cancel",
+    request_body = ShiftCancelRequest,
+    params(
+        ("shift_id" = Uuid, Path, description = "Shift unique identifier")
+    ),
+    responses(
+        (status = 204, description = "Shift cancelled"),
+        (status = 404, description = "Shift not found", body = ErrorResponse),
+        (status = 409, description = "Invalid shift status", body = ErrorResponse),
+        (status = 422, description = "Validation error", body = ErrorResponse)
+    ),
+    tag = "shifts",
+    summary = "Cancel a shift",
+    description = "Cancel an open or upcoming shift"
+)]
+pub async fn cancel_shift(
+    State(state): State<AppState>,
+    Path(shift_id): Path<Uuid>,
+    Json(payload): Json<ShiftCancelRequest>,
+) -> AppResult<StatusCode> {
+    payload.validate().map_err(|e| AppError::Validation(e.to_string()))?;
+
+    state
+        .shift_service
+        .cancel_shift(shift_id, &payload.reason)
+        .await
+        .map(|_| StatusCode::NO_CONTENT)
+        .map_err(map_shift_error)
+}
+
+/// POST /api/v1/shifts/{shift_id}/reschedule
+#[utoipa::path(
+    post,
+    path = "/api/v1/shifts/{shift_id}/reschedule",
+    request_body = ShiftRescheduleRequest,
+    params(
+        ("shift_id" = Uuid, Path, description = "Shift unique identifier")
+    ),
+    responses(
+        (status = 204, description = "Shift rescheduled"),
+        (status = 404, description = "Shift not found", body = ErrorResponse),
+        (status = 409, description = "Invalid shift status", body = ErrorResponse),
+        (status = 422, description = "Validation error", body = ErrorResponse)
+    ),
+    tag = "shifts",
+    summary = "Reschedule a shift",
+    description = "Update the start time and duration for a shift"
+)]
+pub async fn reschedule_shift(
+    State(state): State<AppState>,
+    Path(shift_id): Path<Uuid>,
+    Json(payload): Json<ShiftRescheduleRequest>,
+) -> AppResult<StatusCode> {
+    payload.validate().map_err(|e| AppError::Validation(e.to_string()))?;
+
+    state
+        .shift_service
+        .reschedule_shift(shift_id, payload.scheduled_start, payload.duration_hours)
+        .await
+        .map(|_| StatusCode::NO_CONTENT)
+        .map_err(map_shift_error)
+}
+
 /// Error response for API documentation
 #[derive(Debug, serde::Serialize, serde::Deserialize, ToSchema)]
 pub struct ErrorResponse {
@@ -161,5 +446,24 @@ fn map_shift_error(e: ShiftServiceError) -> AppError {
         ShiftServiceError::DatabaseError(e) => AppError::Database(e),
         ShiftServiceError::DuplicateShift(msg) => AppError::Conflict(msg),
         ShiftServiceError::HospitalNotApproved(msg) => AppError::Forbidden(msg),
+        ShiftServiceError::DuplicateInterest => {
+            AppError::Conflict("Shift interest already exists".to_string())
+        }
+        ShiftServiceError::DuplicateApplication => {
+            AppError::Conflict("Shift application already exists".to_string())
+        }
+        ShiftServiceError::ProfileIncomplete => {
+            AppError::Forbidden("Clinician profile is incomplete".to_string())
+        }
+        ShiftServiceError::ClinicianBusy => {
+            AppError::Conflict("Clinician already assigned to an active shift".to_string())
+        }
+        ShiftServiceError::NotAuthorized => {
+            AppError::Forbidden("Not authorized to view applications".to_string())
+        }
+        ShiftServiceError::AlreadyAssigned => {
+            AppError::Conflict("Shift already assigned".to_string())
+        }
+        ShiftServiceError::InvalidStatus(msg) => AppError::Conflict(msg),
     }
 }

@@ -51,19 +51,19 @@ pub struct ClinicianBankAccount {
 // Request / response types
 // ---------------------------------------------------------------------------
 
-/// AC-01: Send OTP to phone number
+/// AC-01: Send OTP to email
 #[derive(Debug, Deserialize, Validate, ToSchema)]
 pub struct SendOtpRequest {
-    #[validate(length(min = 7, max = 20, message = "Phone must be in E.164 format"))]
-    #[schema(example = "+2348012345678")]
-    pub phone: String,
+    #[validate(email(message = "A valid email address is required"))]
+    #[schema(example = "clinician@example.com")]
+    pub email: String,
 }
 
 /// AC-02: Verify OTP and create account
 #[derive(Debug, Deserialize, Validate, ToSchema)]
 pub struct VerifyOtpRequest {
-    #[validate(length(min = 7, max = 20))]
-    pub phone: String,
+    #[validate(email(message = "A valid email address is required"))]
+    pub email: String,
     #[validate(length(equal = 6, message = "OTP must be 6 digits"))]
     pub otp: String,
 }
@@ -113,7 +113,7 @@ pub struct ProfileResponse {
     pub last_name: String,
     pub role: ClinicianRole,
     pub license_number: String,
-    pub phone: String,
+    pub email: String,
 }
 
 #[derive(Debug, Serialize, ToSchema)]

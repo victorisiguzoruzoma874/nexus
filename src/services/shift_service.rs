@@ -3,9 +3,11 @@ use sqlx::PgPool;
 use uuid::Uuid;
 use chrono::{Utc, Duration};
 
-use crate::models::shift::{Shift, CreateShiftRequest, ShiftType, ShiftPriority};
+use crate::models::shift::{Shift, CreateShiftRequest, ShiftType, ShiftPriority, ShiftStatus};
 use crate::repositories::shift::ShiftRepository;
 use crate::services::notification_service::NotificationService;
+use crate::services::email_outbox_service::EmailOutboxService;
+use crate::services::email_templates;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ShiftServiceError {
@@ -20,6 +22,27 @@ pub enum ShiftServiceError {
     
     #[error("Duplicate shift: {0}")]
     DuplicateShift(String),
+
+    #[error("Duplicate shift interest")]
+    DuplicateInterest,
+
+    #[error("Duplicate shift application")]
+    DuplicateApplication,
+
+    #[error("Clinician profile is incomplete")]
+    ProfileIncomplete,
+
+    #[error("Clinician already assigned to an active shift")]
+    ClinicianBusy,
+
+    #[error("Not authorized to view applications")]
+    NotAuthorized,
+
+    #[error("Shift already assigned")]
+    AlreadyAssigned,
+
+    #[error("Invalid shift status: {0}")]
+    InvalidStatus(String),
     
     #[error("Hospital not approved: {0}")]
     HospitalNotApproved(String),
@@ -29,11 +52,17 @@ pub struct ShiftService {
     shift_repo: Arc<ShiftRepository>,
     pool: PgPool,
     notification_service: Arc<NotificationService>,
+    email_outbox: Arc<EmailOutboxService>,
 }
 
 impl ShiftService {
-    pub fn new(shift_repo: Arc<ShiftRepository>, pool: PgPool, notification_service: Arc<NotificationService>) -> Self {
-        Self { shift_repo, pool, notification_service }
+    pub fn new(
+        shift_repo: Arc<ShiftRepository>,
+        pool: PgPool,
+        notification_service: Arc<NotificationService>,
+        email_outbox: Arc<EmailOutboxService>,
+    ) -> Self {
+        Self { shift_repo, pool, notification_service, email_outbox }
     }
 
     pub async fn create_shift(
@@ -76,6 +105,19 @@ impl ShiftService {
         // AC-07: Send push notifications to eligible workers
         self.broadcast_shift_notifications(shift.id, hospital_id, matched_count).await?;
 
+        if let Ok(Some((hospital_name, hospital_email))) =
+            self.shift_repo.get_hospital_contact(hospital_id).await
+        {
+            let content = email_templates::shift_created(
+                &hospital_name,
+                &shift.role_title,
+                shift.scheduled_start,
+            );
+            if let Err(e) = self.email_outbox.enqueue_email(&hospital_email, &content).await {
+                eprintln!("Warning: Failed to queue shift created email: {}", e);
+            }
+        }
+
         Ok(shift)
     }
 
@@ -84,6 +126,373 @@ impl ShiftService {
             .get_by_id(shift_id)
             .await?
             .ok_or(ShiftServiceError::NotFound(shift_id))
+    }
+
+    pub async fn list_shifts(
+        &self,
+        status_filter: Option<ShiftStatus>,
+        page: i64,
+        page_size: i64,
+    ) -> Result<(Vec<Shift>, i64), ShiftServiceError> {
+        let page = page.max(1);
+        let page_size = page_size.clamp(1, 100);
+        let offset = (page - 1) * page_size;
+
+        let shifts = self
+            .shift_repo
+            .list_shifts(status_filter.clone(), page_size, offset)
+            .await?;
+
+        let total = self.shift_repo.count_shifts(status_filter).await?;
+
+        Ok((shifts, total))
+    }
+
+    pub async fn express_interest(
+        &self,
+        shift_id: Uuid,
+        clinician_id: Uuid,
+    ) -> Result<(), ShiftServiceError> {
+        let shift = self
+            .shift_repo
+            .get_by_id(shift_id)
+            .await?
+            .ok_or(ShiftServiceError::NotFound(shift_id))?;
+
+        let is_waitlisted = shift.assigned_clinician_id.is_some();
+
+        let result = self
+            .shift_repo
+            .add_interest(shift_id, clinician_id, false, is_waitlisted)
+            .await;
+
+        match result {
+            Ok(()) => Ok(()),
+            Err(sqlx::Error::Database(db_err)) if db_err.is_unique_violation() => {
+                Err(ShiftServiceError::DuplicateInterest)
+            }
+            Err(err) => Err(ShiftServiceError::DatabaseError(err)),
+        }
+    }
+
+    pub async fn apply_for_shift(
+        &self,
+        shift_id: Uuid,
+        request: crate::models::shift::ShiftApplicationRequest,
+    ) -> Result<(), ShiftServiceError> {
+        let shift = self
+            .shift_repo
+            .get_by_id(shift_id)
+            .await?
+            .ok_or(ShiftServiceError::NotFound(shift_id))?;
+
+        if shift.status != ShiftStatus::Open {
+            return Err(ShiftServiceError::InvalidStatus(
+                "Shift is not open for applications".to_string(),
+            ));
+        }
+
+        let profile = self
+            .shift_repo
+            .get_clinician_profile_snapshot(request.clinician_id)
+            .await?
+            .ok_or(ShiftServiceError::ProfileIncomplete)?;
+
+        let (first_name, last_name, license_number, role) = profile;
+        let profile_complete = !first_name.trim().is_empty()
+            && !last_name.trim().is_empty()
+            && license_number.as_ref().map(|v| !v.trim().is_empty()).unwrap_or(false)
+            && role.as_ref().map(|v| !v.trim().is_empty()).unwrap_or(false);
+
+        if !profile_complete {
+            return Err(ShiftServiceError::ProfileIncomplete);
+        }
+
+        if self
+            .shift_repo
+            .clinician_has_active_assignment(request.clinician_id)
+            .await?
+        {
+            return Err(ShiftServiceError::ClinicianBusy);
+        }
+
+        let mut tx = self.pool.begin().await?;
+        let result = self
+            .shift_repo
+            .create_application(
+                &mut tx,
+                shift_id,
+                request.clinician_id,
+                &request.applicant_name,
+                &request.license_number,
+                &request.role,
+                request.years_experience,
+                request.experience_summary.as_deref(),
+            )
+            .await;
+
+        match result {
+            Ok(_) => {
+                tx.commit().await?;
+                Ok(())
+            }
+            Err(sqlx::Error::Database(db_err)) if db_err.is_unique_violation() => {
+                Err(ShiftServiceError::DuplicateApplication)
+            }
+            Err(err) => Err(ShiftServiceError::DatabaseError(err)),
+        }
+    }
+
+    pub async fn assign_shift(
+        &self,
+        shift_id: Uuid,
+        clinician_id: Uuid,
+    ) -> Result<(), ShiftServiceError> {
+        let shift = self
+            .shift_repo
+            .get_by_id(shift_id)
+            .await?
+            .ok_or(ShiftServiceError::NotFound(shift_id))?;
+
+        if shift.assigned_clinician_id.is_some() {
+            return Err(ShiftServiceError::AlreadyAssigned);
+        }
+
+        if shift.status != ShiftStatus::Open {
+            return Err(ShiftServiceError::InvalidStatus(format!(
+                "Shift must be open to assign (current: {:?})",
+                shift.status
+            )));
+        }
+
+        if self.shift_repo.clinician_has_active_assignment(clinician_id).await? {
+            return Err(ShiftServiceError::ClinicianBusy);
+        }
+
+        let mut tx = self.pool.begin().await?;
+        let updated = self
+            .shift_repo
+            .assign_clinician(&mut tx, shift_id, clinician_id, ShiftStatus::Upcoming)
+            .await?;
+
+        if updated == 0 {
+            return Err(ShiftServiceError::InvalidStatus(
+                "Shift is not open or already assigned".to_string(),
+            ));
+        }
+
+        let _ = self
+            .shift_repo
+            .update_application_status(
+                &mut tx,
+                shift_id,
+                clinician_id,
+                crate::models::shift::ShiftApplicationStatus::Accepted,
+            )
+            .await;
+
+        tx.commit().await?;
+
+        let hospital_contact = self.shift_repo.get_hospital_contact(shift.hospital_id).await.ok().flatten();
+        let clinician_contact = self.shift_repo.get_clinician_contact(clinician_id).await.ok().flatten();
+
+        let clinician_name = clinician_contact
+            .as_ref()
+            .map(|(first, last, _)| format!("{} {}", first, last).trim().to_string())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| "Clinician".to_string());
+
+        if let Some((_, _, clinician_email)) = clinician_contact {
+            let content = email_templates::shift_assigned_clinician(
+                &clinician_name,
+                shift.hospital_name.as_deref().unwrap_or("the hospital"),
+                &shift.role_title,
+                shift.scheduled_start,
+            );
+            if let Err(e) = self.email_outbox.enqueue_email(&clinician_email, &content).await {
+                eprintln!("Warning: Failed to queue clinician assignment email: {}", e);
+            }
+        }
+
+        if let Some((hospital_name, hospital_email)) = hospital_contact {
+            let content = email_templates::shift_assigned_hospital(
+                &hospital_name,
+                &clinician_name,
+                &shift.role_title,
+                shift.scheduled_start,
+            );
+            if let Err(e) = self.email_outbox.enqueue_email(&hospital_email, &content).await {
+                eprintln!("Warning: Failed to queue hospital assignment email: {}", e);
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn list_applications_for_shift(
+        &self,
+        shift_id: Uuid,
+        requester_user_id: Uuid,
+        page: i64,
+        page_size: i64,
+    ) -> Result<(Vec<crate::models::shift::ShiftApplication>, i64), ShiftServiceError> {
+        let shift = self
+            .shift_repo
+            .get_by_id(shift_id)
+            .await?
+            .ok_or(ShiftServiceError::NotFound(shift_id))?;
+
+        if shift.created_by != requester_user_id {
+            return Err(ShiftServiceError::NotAuthorized);
+        }
+
+        let page = page.max(1);
+        let page_size = page_size.clamp(1, 100);
+        let offset = (page - 1) * page_size;
+
+        let applications = self
+            .shift_repo
+            .list_applications_for_shift(shift_id, page_size, offset)
+            .await?;
+
+        let total = self
+            .shift_repo
+            .count_applications_for_shift(shift_id)
+            .await?;
+
+        Ok((applications, total))
+    }
+
+    pub async fn cancel_shift(
+        &self,
+        shift_id: Uuid,
+        reason: &str,
+    ) -> Result<(), ShiftServiceError> {
+        let shift = self
+            .shift_repo
+            .get_by_id(shift_id)
+            .await?
+            .ok_or(ShiftServiceError::NotFound(shift_id))?;
+
+        if shift.status != ShiftStatus::Open && shift.status != ShiftStatus::Upcoming {
+            return Err(ShiftServiceError::InvalidStatus(format!(
+                "Shift cannot be cancelled from status {:?}",
+                shift.status
+            )));
+        }
+
+        let mut tx = self.pool.begin().await?;
+        let updated = self.shift_repo.cancel_shift(&mut tx, shift_id).await?;
+        if updated == 0 {
+            return Err(ShiftServiceError::InvalidStatus(
+                "Shift is not open or upcoming".to_string(),
+            ));
+        }
+        tx.commit().await?;
+
+        if let Ok(Some((hospital_name, hospital_email))) =
+            self.shift_repo.get_hospital_contact(shift.hospital_id).await
+        {
+            let content = email_templates::shift_cancelled(
+                &hospital_name,
+                &shift.role_title,
+                shift.scheduled_start,
+                reason,
+            );
+            if let Err(e) = self.email_outbox.enqueue_email(&hospital_email, &content).await {
+                eprintln!("Warning: Failed to queue hospital cancellation email: {}", e);
+            }
+        }
+
+        if let Some(clinician_id) = shift.assigned_clinician_id {
+            if let Ok(Some((first_name, last_name, clinician_email))) =
+                self.shift_repo.get_clinician_contact(clinician_id).await
+            {
+                let name = format!("{} {}", first_name, last_name).trim().to_string();
+                let content = email_templates::shift_cancelled(
+                    if name.is_empty() { "Clinician" } else { &name },
+                    &shift.role_title,
+                    shift.scheduled_start,
+                    reason,
+                );
+                if let Err(e) = self.email_outbox.enqueue_email(&clinician_email, &content).await {
+                    eprintln!("Warning: Failed to queue clinician cancellation email: {}", e);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn reschedule_shift(
+        &self,
+        shift_id: Uuid,
+        scheduled_start: chrono::DateTime<Utc>,
+        duration_hours: f32,
+    ) -> Result<(), ShiftServiceError> {
+        if duration_hours <= 0.0 {
+            return Err(ShiftServiceError::ValidationError(
+                "Duration must be greater than zero".to_string(),
+            ));
+        }
+
+        let shift = self
+            .shift_repo
+            .get_by_id(shift_id)
+            .await?
+            .ok_or(ShiftServiceError::NotFound(shift_id))?;
+
+        if shift.status != ShiftStatus::Open && shift.status != ShiftStatus::Upcoming {
+            return Err(ShiftServiceError::InvalidStatus(format!(
+                "Shift cannot be rescheduled from status {:?}",
+                shift.status
+            )));
+        }
+
+        let scheduled_end = scheduled_start + Duration::hours(duration_hours as i64);
+
+        let mut tx = self.pool.begin().await?;
+        let updated = self
+            .shift_repo
+            .reschedule_shift(&mut tx, shift_id, scheduled_start, duration_hours, scheduled_end)
+            .await?;
+        if updated == 0 {
+            return Err(ShiftServiceError::InvalidStatus(
+                "Shift is not open or upcoming".to_string(),
+            ));
+        }
+        tx.commit().await?;
+
+        if let Ok(Some((hospital_name, hospital_email))) =
+            self.shift_repo.get_hospital_contact(shift.hospital_id).await
+        {
+            let content = email_templates::shift_rescheduled(
+                &hospital_name,
+                &shift.role_title,
+                scheduled_start,
+            );
+            if let Err(e) = self.email_outbox.enqueue_email(&hospital_email, &content).await {
+                eprintln!("Warning: Failed to queue hospital reschedule email: {}", e);
+            }
+        }
+
+        if let Some(clinician_id) = shift.assigned_clinician_id {
+            if let Ok(Some((first_name, last_name, clinician_email))) =
+                self.shift_repo.get_clinician_contact(clinician_id).await
+            {
+                let name = format!("{} {}", first_name, last_name).trim().to_string();
+                let content = email_templates::shift_rescheduled(
+                    if name.is_empty() { "Clinician" } else { &name },
+                    &shift.role_title,
+                    scheduled_start,
+                );
+                if let Err(e) = self.email_outbox.enqueue_email(&clinician_email, &content).await {
+                    eprintln!("Warning: Failed to queue clinician reschedule email: {}", e);
+                }
+            }
+        }
+
+        Ok(())
     }
 
     fn validate_request(&self, request: &CreateShiftRequest) -> Result<(), ShiftServiceError> {

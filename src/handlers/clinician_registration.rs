@@ -11,19 +11,19 @@ use crate::services::clinician_registration_service::ClinicianRegistrationError;
 use crate::utils::errors::{AppError, AppResult};
 
 /// POST /api/v1/clinicians/otp/send
-/// AC-01: Send OTP to phone number
+/// AC-01: Send OTP to email
 #[utoipa::path(
     post,
     path = "/api/v1/clinicians/otp/send",
     request_body = SendOtpRequest,
     responses(
         (status = 200, description = "OTP sent successfully", body = SendOtpResponse),
-        (status = 409, description = "Phone number already registered"),
+        (status = 409, description = "Email already registered"),
         (status = 422, description = "Validation error")
     ),
     tag = "clinicians",
     summary = "Send OTP for clinician registration",
-    description = "Send a 6-digit OTP code to the clinician's phone number to start registration"
+    description = "Send a 6-digit OTP code to the clinician's email to start registration"
 )]
 pub async fn send_otp(
     State(state): State<AppState>,
@@ -33,7 +33,7 @@ pub async fn send_otp(
 
     state
         .clinician_registration_service
-        .send_otp(&req.phone)
+        .send_otp(&req.email)
         .await
         .map(|r| (StatusCode::OK, Json(r)))
         .map_err(map_err)
@@ -61,7 +61,7 @@ pub async fn verify_otp(
 
     state
         .clinician_registration_service
-        .verify_otp(&req.phone, &req.otp)
+        .verify_otp(&req.email, &req.otp)
         .await
         .map(|r| (StatusCode::CREATED, Json(r)))
         .map_err(map_err)
@@ -135,8 +135,8 @@ pub async fn add_bank_account(
 
 fn map_err(e: ClinicianRegistrationError) -> AppError {
     match e {
-        ClinicianRegistrationError::DuplicatePhone => {
-            AppError::Conflict("Phone number already registered".to_string())
+        ClinicianRegistrationError::DuplicateEmail => {
+            AppError::Conflict("Email already registered".to_string())
         }
         ClinicianRegistrationError::InvalidOtp => {
             AppError::Validation("Invalid or expired OTP".to_string())

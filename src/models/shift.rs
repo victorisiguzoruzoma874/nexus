@@ -515,6 +515,91 @@ pub struct ShiftWizardDraft {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
+
+// ---------------------------------------------------------------------------
+// Shift action requests
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Deserialize, Validate, ToSchema)]
+pub struct ShiftInterestRequest {
+    pub clinician_id: Uuid,
+}
+
+#[derive(Debug, Clone, Deserialize, Validate, ToSchema)]
+pub struct ShiftAssignRequest {
+    pub clinician_id: Uuid,
+}
+
+#[derive(Debug, Clone, Deserialize, Validate, ToSchema)]
+pub struct ShiftCancelRequest {
+    #[validate(length(min = 3, max = 500))]
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Validate, ToSchema)]
+pub struct ShiftRescheduleRequest {
+    pub scheduled_start: DateTime<Utc>,
+    #[validate(range(min = 0.1, max = 72.0))]
+    pub duration_hours: f32,
+}
+
+// ---------------------------------------------------------------------------
+// Shift applications
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type, ToSchema)]
+#[sqlx(type_name = "shift_application_status", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum ShiftApplicationStatus {
+    Submitted,
+    Withdrawn,
+    Accepted,
+    Rejected,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
+pub struct ShiftApplication {
+    pub id: Uuid,
+    pub shift_id: Uuid,
+    pub clinician_id: Uuid,
+    pub applicant_name: String,
+    pub license_number: String,
+    pub role: String,
+    pub years_experience: i32,
+    pub experience_summary: Option<String>,
+    pub status: ShiftApplicationStatus,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Deserialize, Validate, ToSchema)]
+pub struct ShiftApplicationRequest {
+    pub clinician_id: Uuid,
+    #[validate(length(min = 2, max = 200))]
+    pub applicant_name: String,
+    #[validate(length(min = 2, max = 100))]
+    pub license_number: String,
+    #[validate(length(min = 2, max = 100))]
+    pub role: String,
+    #[validate(range(min = 0, max = 60))]
+    pub years_experience: i32,
+    #[validate(length(max = 2000))]
+    pub experience_summary: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct ShiftApplicationsQuery {
+    pub requester_user_id: Uuid,
+    pub page: Option<i64>,
+    pub page_size: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct ShiftListQuery {
+    pub status: Option<ShiftStatus>,
+    pub page: Option<i64>,
+    pub page_size: Option<i64>,
+}
 // ---------------------------------------------------------------------------
 // Request / response types
 // ---------------------------------------------------------------------------
