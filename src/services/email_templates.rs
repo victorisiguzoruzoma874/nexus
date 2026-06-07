@@ -204,6 +204,78 @@ pub fn shift_assigned_clinician(
     EmailContent { subject, text_body, html_body }
 }
 
+/// Tier 2.4 — Sent to the hospital when a worker declines a shift offer.
+pub fn shift_offer_declined(
+    role_title: &str,
+    scheduled_start: DateTime<Utc>,
+    reason: Option<&str>,
+) -> EmailContent {
+    let subject = "Shift Offer Declined - NexusCare".to_string();
+    let reason_line = reason
+        .filter(|s| !s.trim().is_empty())
+        .map(|r| format!("\nReason: {r}"))
+        .unwrap_or_default();
+    let text_body = format!(
+        "The shift offer was declined.\nRole: {}\nStart: {}{}\n\nYou can select the next ranked candidate.\n\nNexusCare",
+        role_title,
+        format_timestamp(scheduled_start),
+        reason_line
+    );
+    let html_body = wrap_html(
+        "Shift Offer Declined",
+        &format!(
+            "<p style=\"margin:0 0 12px 0;\">The shift offer was declined.</p>
+             <p style=\"margin:0 0 12px 0;\"><strong>Role:</strong> {}<br/>\
+                                              <strong>Start:</strong> {}{}</p>
+             <p style=\"margin:0 0 12px 0;\">You can select the next ranked candidate.</p>
+             <p style=\"margin:0;\">NexusCare</p>",
+            role_title,
+            format_timestamp(scheduled_start),
+            reason.filter(|s| !s.trim().is_empty())
+                .map(|r| format!("<br/><strong>Reason:</strong> {r}"))
+                .unwrap_or_default()
+        ),
+    );
+
+    EmailContent { subject, text_body, html_body }
+}
+
+/// Tier 2.3 — Sent to a clinician when a hospital sends them a shift offer
+/// (§3.4.5). Offer expires in 30 minutes (BR-F1-21).
+pub fn shift_offered(
+    clinician_first_name: &str,
+    role_title: &str,
+    scheduled_start: DateTime<Utc>,
+    expires_at: DateTime<Utc>,
+) -> EmailContent {
+    let subject = "Shift Offer - NexusCare".to_string();
+    let text_body = format!(
+        "Hello {},\n\nYou have a new shift offer.\nRole: {}\nStart: {}\nOffer expires: {}\n\nOpen the NexusCare app to accept or decline.\n\nNexusCare",
+        clinician_first_name,
+        role_title,
+        format_timestamp(scheduled_start),
+        format_timestamp(expires_at)
+    );
+    let html_body = wrap_html(
+        "Shift Offer",
+        &format!(
+            "<p style=\"margin:0 0 12px 0;\">Hello {},</p>
+             <p style=\"margin:0 0 12px 0;\">You have a new shift offer.</p>
+             <p style=\"margin:0 0 12px 0;\"><strong>Role:</strong> {}<br/>\
+                                              <strong>Start:</strong> {}<br/>\
+                                              <strong>Offer expires:</strong> {}</p>
+             <p style=\"margin:0 0 12px 0;\">Open the NexusCare app to accept or decline.</p>
+             <p style=\"margin:0;\">NexusCare</p>",
+            clinician_first_name,
+            role_title,
+            format_timestamp(scheduled_start),
+            format_timestamp(expires_at)
+        ),
+    );
+
+    EmailContent { subject, text_body, html_body }
+}
+
 pub fn shift_assigned_hospital(
     hospital_name: &str,
     clinician_name: &str,

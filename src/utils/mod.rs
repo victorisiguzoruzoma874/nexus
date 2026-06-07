@@ -1,6 +1,7 @@
 pub mod config;
 pub mod db;
 pub mod errors;
+pub mod geo;
 pub mod validation;
 
 pub use config::AppConfig;

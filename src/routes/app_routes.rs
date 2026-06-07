@@ -1,6 +1,6 @@
 use axum::{
     middleware::from_fn,
-    routing::{get, patch, post},
+    routing::{delete, get, patch, post},
     Router,
 };
 
@@ -85,6 +85,23 @@ pub struct AppState {
         crate::handlers::shifts::express_interest,
         crate::handlers::shifts::apply_for_shift,
         crate::handlers::shifts::list_shift_applications,
+        crate::handlers::shifts::list_interested_for_shift,
+        crate::handlers::shifts::offer_shift,
+        crate::handlers::shifts::accept_shift,
+        crate::handlers::shifts::decline_shift,
+        crate::handlers::shifts::clock_in,
+        crate::handlers::shifts::submit_handover,
+        crate::handlers::shifts::clock_out,
+        crate::handlers::shifts::request_handover_revision,
+        crate::handlers::shifts::rate_worker,
+        crate::handlers::shifts::rate_hospital,
+        crate::handlers::shifts::edit_rating,
+        crate::handlers::shifts::list_nearby_shifts,
+        crate::handlers::shifts::list_my_applications,
+        crate::handlers::shifts::withdraw_interest,
+        crate::handlers::shifts::bookmark_shift,
+        crate::handlers::shifts::unbookmark_shift,
+        crate::handlers::shifts::dismiss_shift,
         crate::handlers::shifts::assign_shift,
         crate::handlers::shifts::cancel_shift,
         crate::handlers::shifts::reschedule_shift,
@@ -107,6 +124,26 @@ pub struct AppState {
             crate::handlers::shifts::ShiftListResponse,
             crate::handlers::shifts::ShiftApplicationsResponse,
             crate::handlers::shifts::PaginationMetadata,
+            crate::models::shift::RankedInterestedClinician,
+            crate::models::shift::ShiftOfferRequest,
+            crate::models::shift::ShiftOfferResponse,
+            crate::models::shift::NdprConsent,
+            crate::models::shift::AcceptShiftRequest,
+            crate::models::shift::DeclineShiftRequest,
+            crate::models::shift::ClockinRequest,
+            crate::models::shift::ClockinResponse,
+            crate::models::shift::ClockinMethod,
+            crate::models::shift::SubmitHandoverRequest,
+            crate::models::shift::HandoverResponse,
+            crate::models::shift::ClockoutResponse,
+            crate::models::shift::HandoverRevisionRequest,
+            crate::models::shift::HospitalRatingDimensions,
+            crate::models::shift::RateWorkerRequest,
+            crate::models::shift::RateHospitalRequest,
+            crate::models::shift::EditRatingRequest,
+            crate::models::shift::RatingResponse,
+            crate::models::shift::NearbyShiftCard,
+            crate::models::shift::MyApplicationEntry,
             // Admin
             crate::handlers::admin::ClinicianListResponse,
             crate::handlers::admin::PaginationMetadata,
@@ -379,6 +416,86 @@ pub fn create_router(
             "/api/v1/shifts/{shift_id}/applications",
             get(shifts::list_shift_applications)
                 .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
+        )
+        .route(
+            "/api/v1/shifts/{shift_id}/interested",
+            get(shifts::list_interested_for_shift)
+                .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
+        )
+        .route(
+            "/api/v1/shifts/{shift_id}/offer",
+            post(shifts::offer_shift)
+                .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
+        )
+        .route(
+            "/api/v1/shifts/{shift_id}/accept",
+            post(shifts::accept_shift)
+                .route_layer(from_fn(require_role(&[UserRole::HealthWorker]))),
+        )
+        .route(
+            "/api/v1/shifts/{shift_id}/decline",
+            post(shifts::decline_shift)
+                .route_layer(from_fn(require_role(&[UserRole::HealthWorker]))),
+        )
+        .route(
+            "/api/v1/shifts/{shift_id}/clockin",
+            post(shifts::clock_in)
+                .route_layer(from_fn(require_role(&[UserRole::HealthWorker]))),
+        )
+        .route(
+            "/api/v1/shifts/{shift_id}/handover",
+            post(shifts::submit_handover)
+                .route_layer(from_fn(require_role(&[UserRole::HealthWorker]))),
+        )
+        .route(
+            "/api/v1/shifts/{shift_id}/clockout",
+            post(shifts::clock_out)
+                .route_layer(from_fn(require_role(&[UserRole::HealthWorker]))),
+        )
+        .route(
+            "/api/v1/shifts/{shift_id}/handover/revision",
+            post(shifts::request_handover_revision)
+                .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
+        )
+        .route(
+            "/api/v1/shifts/{shift_id}/ratings/worker",
+            post(shifts::rate_worker)
+                .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
+        )
+        .route(
+            "/api/v1/shifts/{shift_id}/ratings/hospital",
+            post(shifts::rate_hospital)
+                .route_layer(from_fn(require_role(&[UserRole::HealthWorker]))),
+        )
+        .route(
+            "/api/v1/ratings/{rating_id}",
+            patch(shifts::edit_rating),
+        )
+        .route(
+            "/api/v1/worker/shifts/nearby",
+            get(shifts::list_nearby_shifts)
+                .route_layer(from_fn(require_role(&[UserRole::HealthWorker]))),
+        )
+        .route(
+            "/api/v1/worker/shifts/my-applications",
+            get(shifts::list_my_applications)
+                .route_layer(from_fn(require_role(&[UserRole::HealthWorker]))),
+        )
+        .route(
+            "/api/v1/shifts/{shift_id}/interest",
+            delete(shifts::withdraw_interest)
+                .route_layer(from_fn(require_role(&[UserRole::HealthWorker]))),
+        )
+        .route(
+            "/api/v1/shifts/{shift_id}/bookmark",
+            post(shifts::bookmark_shift)
+                .delete(shifts::unbookmark_shift)
+                .route_layer(from_fn(require_role(&[UserRole::HealthWorker]))),
+        )
+        .route(
+            "/api/v1/shifts/{shift_id}/dismiss",
+            post(shifts::dismiss_shift)
+                .route_layer(from_fn(require_role(&[UserRole::HealthWorker]))),
         )
         .route(
             "/api/v1/shifts/{shift_id}/assign",
