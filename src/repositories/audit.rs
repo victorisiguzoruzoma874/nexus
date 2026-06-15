@@ -12,7 +12,6 @@ pub enum AuditError {
 }
 
 /// Repository for immutable audit log persistence
-/// Ensures all registration events are tracked (AC-04, AC-05)
 pub struct AuditRepository {
     pool: PgPool,
 }
@@ -23,7 +22,6 @@ impl AuditRepository {
     }
 
     /// Create a new audit entry (immutable)
-    /// Requirements: 8.1, 8.2, 8.4
     pub async fn create(&self, entry: NewAuditEntry) -> Result<AuditEntry, AuditError> {
         let result = sqlx::query_as::<_, AuditEntry>(
             r#"
@@ -56,7 +54,6 @@ impl AuditRepository {
     }
 
     /// Find audit entries by hospital ID
-    /// Requirements: 8.2
     pub async fn find_by_hospital_id(
         &self,
         hospital_id: Uuid,
@@ -82,7 +79,6 @@ impl AuditRepository {
     }
 
     /// Find audit entries by event type within a date range
-    /// Requirements: 8.2
     pub async fn find_by_event_type(
         &self,
         event_type: AuditEventType,
@@ -115,5 +111,4 @@ mod tests {
     use super::*;
 
     // Unit tests will be added here
-    // Property tests will be in Task 2.5
 }

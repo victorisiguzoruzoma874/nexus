@@ -1,4 +1,4 @@
-//! HTTP middleware.
+// ! HTTP middleware.
 
 pub mod require_role;
 

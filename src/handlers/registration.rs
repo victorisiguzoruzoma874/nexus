@@ -53,8 +53,6 @@ pub struct ErrorResponse {
 }
 
 /// Register a new hospital
-/// 
-/// Handles hospital registration requests. In production, user_id should come from JWT token.
 #[utoipa::path(
     post,
     path = "/api/v1/hospitals/register",
@@ -72,7 +70,6 @@ pub async fn register_hospital(
     Json(request): Json<HospitalRegistrationRequest>,
 ) -> Result<(StatusCode, Json<HospitalRegistrationResponse>), (StatusCode, Json<ErrorResponse>)> {
     let user_id = Uuid::new_v4();
-
     match state.registration_service.register_hospital(user_id, request).await {
         Ok(result) => Ok((
             StatusCode::CREATED,
@@ -89,8 +86,11 @@ pub async fn register_hospital(
                 RegistrationError::DuplicateRegistration(_) => (StatusCode::CONFLICT, "DUPLICATE_REGISTRATION"),
                 RegistrationError::NotFound(_) => (StatusCode::NOT_FOUND, "NOT_FOUND"),
                 RegistrationError::InvalidStatusTransition(_, _) => (StatusCode::CONFLICT, "INVALID_STATUS_TRANSITION"),
-                RegistrationError::LocationError(_) | RegistrationError::PaymentError(_) => {
+                RegistrationError::LocationError(_) => {
                     (StatusCode::SERVICE_UNAVAILABLE, "EXTERNAL_SERVICE_ERROR")
+                }
+                RegistrationError::IdentityNotVerified => {
+                    (StatusCode::FORBIDDEN, "IDENTITY_NOT_VERIFIED")
                 }
                 _ => (StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR"),
             };
@@ -98,9 +98,7 @@ pub async fn register_hospital(
             Err((
                 status,
                 Json(ErrorResponse {
-                    code: code.to_string(),
-                    message: e.to_string(),
-                }),
+                    code: code.to_string(), message: e.to_string(), }),
             ))
         }
     }
@@ -134,17 +132,13 @@ pub async fn get_registration_status(
             Err((
                 status_code,
                 Json(ErrorResponse {
-                    code: "ERROR".to_string(),
-                    message: e.to_string(),
-                }),
+                    code: "ERROR".to_string(), message: e.to_string(), }),
             ))
         }
     }
 }
 
 /// Approve hospital registration
-/// 
-/// Admin-only endpoint. In production, admin_id should come from JWT token.
 #[utoipa::path(
     post,
     path = "/api/v1/admin/hospitals/{hospital_id}/approve",
@@ -171,31 +165,30 @@ pub async fn approve_hospital(
 
     match state.registration_service.approve_hospital(hospital_id, admin_id, request.notes).await {
         Ok(_) => Ok(Json(StatusChangeResponse {
-            message: "Hospital approved successfully".to_string(),
-            hospital_id,
-            new_status: "Approved".to_string(),
-        })),
+            message: "Hospital approved successfully".to_string(), hospital_id,
+            new_status: "Approved".to_string(), })),
         Err(e) => {
-            let status_code = match e {
-                RegistrationError::NotFound(_) => StatusCode::NOT_FOUND,
-                RegistrationError::InvalidStatusTransition(_, _) => StatusCode::CONFLICT,
-                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            let (status_code, code) = match e {
+                RegistrationError::NotFound(_) => (StatusCode::NOT_FOUND, "NOT_FOUND"),
+                RegistrationError::InvalidStatusTransition(_, _) => {
+                    (StatusCode::CONFLICT, "INVALID_STATUS_TRANSITION")
+                }
+                RegistrationError::IdentityNotVerified => {
+                    (StatusCode::FORBIDDEN, "IDENTITY_NOT_VERIFIED")
+                }
+                _ => (StatusCode::INTERNAL_SERVER_ERROR, "ERROR"),
             };
 
             Err((
                 status_code,
                 Json(ErrorResponse {
-                    code: "ERROR".to_string(),
-                    message: e.to_string(),
-                }),
+                    code: code.to_string(), message: e.to_string(), }),
             ))
         }
     }
 }
 
 /// Reject hospital registration
-/// 
-/// Admin-only endpoint. In production, admin_id should come from JWT token.
 #[utoipa::path(
     post,
     path = "/api/v1/admin/hospitals/{hospital_id}/reject",
@@ -223,10 +216,8 @@ pub async fn reject_hospital(
 
     match state.registration_service.reject_hospital(hospital_id, admin_id, request.reason).await {
         Ok(_) => Ok(Json(StatusChangeResponse {
-            message: "Hospital rejected successfully".to_string(),
-            hospital_id,
-            new_status: "Rejected".to_string(),
-        })),
+            message: "Hospital rejected successfully".to_string(), hospital_id,
+            new_status: "Rejected".to_string(), })),
         Err(e) => {
             let status_code = match e {
                 RegistrationError::ValidationError(_) => StatusCode::BAD_REQUEST,
@@ -238,9 +229,7 @@ pub async fn reject_hospital(
             Err((
                 status_code,
                 Json(ErrorResponse {
-                    code: "ERROR".to_string(),
-                    message: e.to_string(),
-                }),
+                    code: "ERROR".to_string(), message: e.to_string(), }),
             ))
         }
     }
@@ -268,7 +257,7 @@ pub async fn list_hospitals(
     use crate::models::registration::RegistrationStatus;
     
     let status_filter = if let Some(status_str) = params.status {
-        match status_str.to_lowercase().as_str() {
+        match status_str.to_lowercase(). as_str() {
             "pending" => Some(RegistrationStatus::Pending),
             "approved" => Some(RegistrationStatus::Approved),
             "rejected" => Some(RegistrationStatus::Rejected),
@@ -276,9 +265,7 @@ pub async fn list_hospitals(
                 return Err((
                     StatusCode::BAD_REQUEST,
                     Json(ErrorResponse {
-                        code: "INVALID_STATUS".to_string(),
-                        message: "Status must be one of: pending, approved, rejected".to_string(),
-                    }),
+                        code: "INVALID_STATUS".to_string(), message: "Status must be one of: pending, approved, rejected".to_string(), }),
                 ));
             }
         }
@@ -295,9 +282,7 @@ pub async fn list_hospitals(
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorResponse {
-                    code: "ERROR".to_string(),
-                    message: e.to_string(),
-                }),
+                    code: "ERROR".to_string(), message: e.to_string(), }),
             ))
         }
     }

@@ -11,7 +11,6 @@ use crate::services::clinician_registration_service::ClinicianRegistrationError;
 use crate::utils::errors::{AppError, AppResult};
 
 /// POST /api/v1/clinicians/otp/send
-/// AC-01: Send OTP to email
 #[utoipa::path(
     post,
     path = "/api/v1/clinicians/otp/send",
@@ -29,7 +28,7 @@ pub async fn send_otp(
     State(state): State<AppState>,
     Json(req): Json<SendOtpRequest>,
 ) -> AppResult<(StatusCode, Json<SendOtpResponse>)> {
-    req.validate().map_err(|e| AppError::Validation(e.to_string()))?;
+    req.validate(). map_err(|e| AppError::Validation(e.to_string()))?;
 
     state
         .clinician_registration_service
@@ -40,7 +39,6 @@ pub async fn send_otp(
 }
 
 /// POST /api/v1/clinicians/otp/verify
-/// AC-02: Verify OTP and create account
 #[utoipa::path(
     post,
     path = "/api/v1/clinicians/otp/verify",
@@ -57,7 +55,7 @@ pub async fn verify_otp(
     State(state): State<AppState>,
     Json(req): Json<VerifyOtpRequest>,
 ) -> AppResult<(StatusCode, Json<VerifyOtpResponse>)> {
-    req.validate().map_err(|e| AppError::Validation(e.to_string()))?;
+    req.validate(). map_err(|e| AppError::Validation(e.to_string()))?;
 
     state
         .clinician_registration_service
@@ -68,7 +66,6 @@ pub async fn verify_otp(
 }
 
 /// PUT /api/v1/clinicians/{clinician_id}/profile
-/// AC-03: Complete profile
 #[utoipa::path(
     put,
     path = "/api/v1/clinicians/{clinician_id}/profile",
@@ -90,7 +87,7 @@ pub async fn complete_profile(
     axum::extract::Path(clinician_id): axum::extract::Path<Uuid>,
     Json(req): Json<CompleteProfileRequest>,
 ) -> AppResult<Json<ProfileResponse>> {
-    req.validate().map_err(|e| AppError::Validation(e.to_string()))?;
+    req.validate(). map_err(|e| AppError::Validation(e.to_string()))?;
 
     state
         .clinician_registration_service
@@ -101,7 +98,6 @@ pub async fn complete_profile(
 }
 
 /// POST /api/v1/clinicians/{clinician_id}/bank-account
-/// AC-04: Add and validate bank account
 #[utoipa::path(
     post,
     path = "/api/v1/clinicians/{clinician_id}/bank-account",
@@ -123,7 +119,7 @@ pub async fn add_bank_account(
     axum::extract::Path(clinician_id): axum::extract::Path<Uuid>,
     Json(req): Json<AddBankAccountRequest>,
 ) -> AppResult<Json<BankAccountResponse>> {
-    req.validate().map_err(|e| AppError::Validation(e.to_string()))?;
+    req.validate(). map_err(|e| AppError::Validation(e.to_string()))?;
 
     state
         .clinician_registration_service
@@ -148,6 +144,9 @@ fn map_err(e: ClinicianRegistrationError) -> AppError {
         ClinicianRegistrationError::Payment(e) => {
             AppError::Validation(format!("Bank account validation failed: {}", e))
         }
+        ClinicianRegistrationError::IdentityNotVerified => AppError::Forbidden(
+            "BVN and NIN must both be verified before adding a bank account".to_string(),
+        ),
         e => AppError::Internal(anyhow::anyhow!("{}", e)),
     }
 }

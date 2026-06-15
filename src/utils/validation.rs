@@ -2,7 +2,7 @@ use chrono::{DateTime, Timelike, Utc};
 use validator::ValidationError;
 
 /// F1-F05: Validates that a shift start time falls on a 15-minute boundary
-/// (i.e. minute ∈ {0, 15, 30, 45} and seconds/sub-seconds are zero).
+
 pub fn validate_15min_boundary(ts: &DateTime<Utc>) -> Result<(), ValidationError> {
     if ts.second() != 0 || ts.nanosecond() != 0 || ts.minute() % 15 != 0 {
         let mut error = ValidationError::new("invalid_time_boundary");
@@ -13,14 +13,11 @@ pub fn validate_15min_boundary(ts: &DateTime<Utc>) -> Result<(), ValidationError
 }
 
 /// Validates email format according to RFC 5322
-/// This is a simplified validator - for production use a proper RFC 5322 parser
 pub fn validate_email_rfc5322(email: &str) -> Result<(), ValidationError> {
     // Basic RFC 5322 validation
     let email_regex = regex::Regex::new(
         r"^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$"
-    ).unwrap();
-    
-    if !email_regex.is_match(email) {
+    ).unwrap(); if !email_regex.is_match(email) {
         return Err(ValidationError::new("invalid_email_format"));
     }
     
@@ -28,13 +25,9 @@ pub fn validate_email_rfc5322(email: &str) -> Result<(), ValidationError> {
 }
 
 /// Validates phone number format according to E.164 international format
-/// E.164 format: +[country code][subscriber number]
-/// Example: +2348012345678
 pub fn validate_phone_e164(phone: &str) -> Result<(), ValidationError> {
     // E.164 format: starts with +, followed by 1-15 digits
-    let phone_regex = regex::Regex::new(r"^\+[1-9]\d{1,14}$").unwrap();
-    
-    if !phone_regex.is_match(phone) {
+    let phone_regex = regex::Regex::new(r"^\+[1-9]\d{1,14}$").unwrap(); if !phone_regex.is_match(phone) {
         let mut error = ValidationError::new("invalid_phone_format");
         error.message = Some("Phone number must be in E.164 format (e.g., +2348012345678)".into());
         return Err(error);

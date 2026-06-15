@@ -4,18 +4,9 @@ use sqlx::FromRow;
 use uuid::Uuid;
 use validator::Validate;
 
-// ---------------------------------------------------------------------------
 // Hospital location
-// ---------------------------------------------------------------------------
 
 /// The confirmed GPS location of a hospital's entrance, set via the
-/// "Set Hospital Location" map screen (drag pin to exact hospital entrance).
-///
-/// Drives two platform features shown on the screen:
-///   - Clock-In Verification: staff must be within `clock_in_radius_meters`
-///     of this point to record their arrival (default 100m)
-///   - Shift Broadcasting: new shifts are prioritised for workers within
-///     `shift_broadcast_radius_km` of this point (default 5km)
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct HospitalLocation {
     pub id: Uuid,
@@ -30,13 +21,11 @@ pub struct HospitalLocation {
     pub place_label: Option<String>,
 
     // --- Geofencing settings ---
-    /// Radius in metres within which staff must be to clock in (default: 100)
     pub clock_in_radius_meters: i32,
     /// Whether GPS clock-in fencing is active (auto-enabled on location confirm)
     pub gps_fencing_enabled: bool,
 
     // --- Shift broadcasting settings ---
-    /// Radius in kilometres used to prioritise shift broadcasts (default: 5)
     pub shift_broadcast_radius_km: f64,
     /// Whether shift distance prioritisation is active
     pub shift_distance_active: bool,
@@ -52,9 +41,7 @@ pub struct HospitalLocation {
     pub updated_at: DateTime<Utc>,
 }
 
-// ---------------------------------------------------------------------------
 // Request / response types
-// ---------------------------------------------------------------------------
 
 /// Payload for setting or updating the hospital's map pin.
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]

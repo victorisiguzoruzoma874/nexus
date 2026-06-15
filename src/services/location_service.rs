@@ -19,7 +19,6 @@ pub enum LocationServiceError {
 }
 
 /// Service for geocoding addresses and storing location data (AC-02)
-/// Requirements: 2.1, 2.2, 2.3, 2.5
 pub struct LocationService {
     geocoding_client: Arc<GeocodingClient>,
     location_repo: Arc<LocationRepository>,
@@ -37,7 +36,6 @@ impl LocationService {
     }
 
     /// Geocode address and store location with 5km service radius
-    /// Requirements: 2.1, 2.2, 2.3, 2.5
     pub async fn geocode_and_store(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -45,7 +43,6 @@ impl LocationService {
         address: Address,
     ) -> Result<HospitalLocation, LocationServiceError> {
         // Step 1: Geocode the address to coordinates
-        // In development, if geocoding fails, use default coordinates for Nigeria
         let coordinates = match self.geocoding_client.geocode_address(&address).await {
             Ok(coords) => coords,
             Err(e) => {
@@ -57,7 +54,6 @@ impl LocationService {
                 );
                 
                 // Use default coordinates (Lagos, Nigeria) for development
-                // In production, you would want to fail here
                 Coordinates {
                     latitude: 6.5244,
                     longitude: 3.3792,
@@ -92,7 +88,6 @@ impl LocationService {
     }
 
     /// Calculate service area based on coordinates and radius
-    /// Requirements: 2.3
     pub fn calculate_service_radius(
         &self,
         coordinates: Coordinates,
@@ -151,8 +146,7 @@ mod tests {
         let location_repo = Arc::new(LocationRepository::new(
             sqlx::PgPool::connect("postgresql://localhost/test")
                 .await
-                .unwrap(),
-        ));
+                .unwrap(), ));
         let service = LocationService::new(geocoding_client, location_repo);
 
         // Valid coordinates
@@ -183,8 +177,7 @@ mod tests {
         let location_repo = Arc::new(LocationRepository::new(
             sqlx::PgPool::connect("postgresql://localhost/test")
                 .await
-                .unwrap(),
-        ));
+                .unwrap(), ));
         let service = LocationService::new(geocoding_client, location_repo);
 
         let coords = Coordinates {
@@ -195,7 +188,7 @@ mod tests {
         // Valid radius
         let result = service.calculate_service_radius(coords.clone(), 5.0);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().radius_km, 5.0);
+        assert_eq!(result.unwrap(). radius_km, 5.0);
 
         // Invalid radius (too small)
         assert!(service.calculate_service_radius(coords.clone(), 0.0).is_err());

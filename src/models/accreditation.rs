@@ -3,13 +3,9 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
 
-// ---------------------------------------------------------------------------
 // Hospital accreditation record
-// ---------------------------------------------------------------------------
 
 /// The accreditation record created when a hospital reaches Step 4 (Access Granted).
-/// "Lagos University Teaching Hospital is now a verified institution on the
-///  NexusCare platform. Your clinical standards have been successfully validated."
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct HospitalAccreditation {
     pub id: Uuid,
@@ -34,16 +30,9 @@ pub struct HospitalAccreditation {
     pub updated_at: DateTime<Utc>,
 }
 
-// ---------------------------------------------------------------------------
 // Platform features
-// ---------------------------------------------------------------------------
 
 /// A platform feature/capability unlocked for verified hospitals.
-/// Maps to the four feature cards shown on the Accreditation Granted screen:
-///   1. Unlimited Shift Broadcasting
-///   2. Direct Clinician Outreach
-///   3. Verified Payroll Integration
-///   4. Performance Analytics
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "platform_feature", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
@@ -58,9 +47,7 @@ pub enum PlatformFeature {
     PerformanceAnalytics,
 }
 
-// ---------------------------------------------------------------------------
 // Response types
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HospitalAccreditationResponse {
@@ -88,7 +75,6 @@ impl From<HospitalAccreditation> for HospitalAccreditationResponse {
 }
 
 /// Summary of all unlocked features for a hospital — returned alongside
-/// the accreditation response so the frontend can render the feature cards.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HospitalFeaturesResponse {
     pub hospital_id: Uuid,

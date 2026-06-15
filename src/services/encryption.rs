@@ -24,7 +24,6 @@ pub enum EncryptionError {
 }
 
 /// Service for encryption and password hashing
-/// Implements AES-256-GCM encryption and bcrypt password hashing
 pub struct EncryptionService {
     encryption_key: Vec<u8>,
     bcrypt_cost: u32,
@@ -32,12 +31,10 @@ pub struct EncryptionService {
 
 impl EncryptionService {
     /// Create a new encryption service with a 32-byte key
-    /// Requirements: 6.3, 6.5
     pub fn new(encryption_key: Vec<u8>) -> Result<Self, EncryptionError> {
         if encryption_key.len() != 32 {
             return Err(EncryptionError::InvalidKey(
-                "Encryption key must be exactly 32 bytes for AES-256".to_string(),
-            ));
+                "Encryption key must be exactly 32 bytes for AES-256".to_string(), ));
         }
 
         Ok(Self {
@@ -64,9 +61,6 @@ impl EncryptionService {
     }
 
     /// Encrypt payment token using AES-256-GCM
-    /// Requirements: 6.5
-    /// 
-    /// Returns base64-encoded ciphertext with nonce prepended
     pub fn encrypt_token(&self, token: &str) -> Result<String, EncryptionError> {
         // Create cipher instance
         let cipher = Aes256Gcm::new_from_slice(&self.encryption_key)
@@ -84,14 +78,12 @@ impl EncryptionService {
             .map_err(|e| EncryptionError::EncryptionFailed(format!("Encryption error: {}", e)))?;
 
         // Prepend nonce to ciphertext and encode as base64
-        let mut result = nonce_bytes.to_vec();
-        result.extend_from_slice(&ciphertext);
+        let mut result = nonce_bytes.to_vec(); result.extend_from_slice(&ciphertext);
         
         Ok(general_purpose::STANDARD.encode(result))
     }
 
     /// Decrypt payment token using AES-256-GCM
-    /// Requirements: 6.5
     pub fn decrypt_token(&self, encrypted_token: &str) -> Result<String, EncryptionError> {
         // Decode from base64
         let encrypted_data = general_purpose::STANDARD
@@ -101,8 +93,7 @@ impl EncryptionService {
         // Extract nonce (first 12 bytes) and ciphertext
         if encrypted_data.len() < 12 {
             return Err(EncryptionError::DecryptionFailed(
-                "Encrypted data too short".to_string(),
-            ));
+                "Encrypted data too short".to_string(), ));
         }
 
         let (nonce_bytes, ciphertext) = encrypted_data.split_at(12);
@@ -122,14 +113,12 @@ impl EncryptionService {
     }
 
     /// Hash password using bcrypt with work factor >= 12
-    /// Requirements: 6.3
     pub fn hash_password(&self, password: &str) -> Result<String, EncryptionError> {
         hash(password, self.bcrypt_cost)
             .map_err(|e| EncryptionError::HashingFailed(format!("Bcrypt error: {}", e)))
     }
 
     /// Verify password against bcrypt hash
-    /// Requirements: 6.3
     pub fn verify_password(&self, password: &str, hash: &str) -> Result<bool, EncryptionError> {
         verify(password, hash).map_err(|_| EncryptionError::VerificationFailed)
     }
@@ -143,8 +132,7 @@ impl EncryptionService {
     pub fn set_bcrypt_cost(&mut self, cost: u32) -> Result<(), EncryptionError> {
         if cost < 12 {
             return Err(EncryptionError::HashingFailed(
-                "Bcrypt cost must be at least 12 per security requirements".to_string(),
-            ));
+                "Bcrypt cost must be at least 12 per security requirements".to_string(), ));
         }
         self.bcrypt_cost = cost;
         Ok(())
@@ -195,11 +183,9 @@ mod tests {
         let service = create_test_service();
         let token = "AUTH_paystack_12345";
 
-        // Encrypt same token twice
+        // Encrypt same token twice — different ciphertexts due to random nonce
         let encrypted1 = service.encrypt_token(token).unwrap();
         let encrypted2 = service.encrypt_token(token).unwrap();
-
-        // Should produce different ciphertexts due to random nonce
         assert_ne!(encrypted1, encrypted2);
 
         // But both should decrypt to the same plaintext
@@ -234,7 +220,7 @@ mod tests {
     #[test]
     fn test_bcrypt_cost_minimum() {
         let mut service = create_test_service();
-        
+
         // Default cost should be >= 12
         assert!(service.get_bcrypt_cost() >= 12);
 
@@ -270,19 +256,14 @@ mod property_tests {
     use proptest::prelude::*;
 
     // Property 23: Password hashing security (bcrypt work factor >= 12)
-    // Property 24: Payment token encryption (AES-256)
 
     proptest! {
         #[test]
         fn property_24_token_encryption_roundtrip(
             token in "[A-Za-z0-9_-]{10,100}",
         ) {
-            let service = EncryptionService::new(EncryptionService::generate_key()).unwrap();
-
-            // Encrypt
-            let encrypted = service.encrypt_token(&token).unwrap();
-            
-            // Property: Encrypted token should not contain plaintext
+            let service = EncryptionService::new(EncryptionService::generate_key()).unwrap(); // Encrypt
+            let encrypted = service.encrypt_token(&token).unwrap(); // Property: Encrypted token should not contain plaintext
             prop_assert!(!encrypted.contains(&token),
                 "Encrypted token should not contain plaintext");
             
@@ -291,8 +272,7 @@ mod property_tests {
                 "Encrypted token should differ from plaintext");
 
             // Property: Decryption should recover original token
-            let decrypted = service.decrypt_token(&encrypted).unwrap();
-            prop_assert_eq!(&decrypted, &token,
+            let decrypted = service.decrypt_token(&encrypted).unwrap(); prop_assert_eq!(&decrypted, &token,
                 "Decrypted token should match original");
         }
     }
@@ -302,16 +282,12 @@ mod property_tests {
         fn property_23_password_hashing_security(
             password in "[A-Za-z0-9!@#$%^&*]{8,50}",
         ) {
-            let service = EncryptionService::new(EncryptionService::generate_key()).unwrap();
-
-            // Property: Bcrypt cost should be >= 12
+            let service = EncryptionService::new(EncryptionService::generate_key()).unwrap(); // Property: Bcrypt cost should be >= 12
             prop_assert!(service.get_bcrypt_cost() >= 12,
                 "Bcrypt cost must be at least 12");
 
             // Hash password
-            let hash = service.hash_password(&password).unwrap();
-
-            // Property: Hash should not contain plaintext password
+            let hash = service.hash_password(&password).unwrap(); // Property: Hash should not contain plaintext password
             prop_assert!(!hash.contains(&password),
                 "Hash should not contain plaintext password");
 
@@ -320,13 +296,11 @@ mod property_tests {
                 "Hash should use bcrypt format");
 
             // Property: Verification should succeed with correct password
-            prop_assert!(service.verify_password(&password, &hash).unwrap(),
-                "Should verify correct password");
+            prop_assert!(service.verify_password(&password, &hash).unwrap(), "Should verify correct password");
 
             // Property: Verification should fail with incorrect password
             let wrong_password = format!("{}wrong", password);
-            prop_assert!(!service.verify_password(&wrong_password, &hash).unwrap(),
-                "Should reject incorrect password");
+            prop_assert!(!service.verify_password(&wrong_password, &hash).unwrap(), "Should reject incorrect password");
         }
     }
 
@@ -335,13 +309,8 @@ mod property_tests {
         fn property_24_encryption_produces_unique_ciphertexts(
             token in "[A-Za-z0-9_-]{10,50}",
         ) {
-            let service = EncryptionService::new(EncryptionService::generate_key()).unwrap();
-
-            // Encrypt same token multiple times
-            let encrypted1 = service.encrypt_token(&token).unwrap();
-            let encrypted2 = service.encrypt_token(&token).unwrap();
-
-            // Property: Same plaintext should produce different ciphertexts (due to random nonce)
+            let service = EncryptionService::new(EncryptionService::generate_key()).unwrap(); // Encrypt same token multiple times
+            let encrypted1 = service.encrypt_token(&token).unwrap(); let encrypted2 = service.encrypt_token(&token).unwrap(); // Property: Same plaintext should produce different ciphertexts (due to random nonce)
             prop_assert_ne!(&encrypted1, &encrypted2,
                 "Same plaintext should produce different ciphertexts");
 
@@ -353,9 +322,7 @@ mod property_tests {
 
     #[test]
     fn test_property_23_bcrypt_cost_enforcement() {
-        let mut service = EncryptionService::new(EncryptionService::generate_key()).unwrap();
-
-        // Property: Should reject cost < 12
+        let mut service = EncryptionService::new(EncryptionService::generate_key()).unwrap(); // Property: Should reject cost < 12
         assert!(service.set_bcrypt_cost(10).is_err());
         assert!(service.set_bcrypt_cost(11).is_err());
 

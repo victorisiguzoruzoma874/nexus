@@ -13,7 +13,10 @@ use crate::services::audit_service::{AuditService, AuditServiceError, Registrati
 use crate::services::location_service::{LocationService, LocationServiceError};
 use crate::services::email_outbox_service::EmailOutboxService;
 use crate::services::email_templates;
-use crate::services::payment_service::{PaymentService, PaymentServiceError};
+use crate::services::wallet_service::WalletService;
+use crate::services::identity_verification_service::{
+    IdentityKind, IdentityOwner, IdentityVerificationService,
+};
 use crate::utils::validation::{validate_email_rfc5322, validate_phone_e164};
 
 #[derive(Debug, thiserror::Error)]
@@ -32,10 +35,7 @@ pub enum RegistrationError {
     
     #[error("Location service error: {0}")]
     LocationError(#[from] LocationServiceError),
-    
-    #[error("Payment service error: {0}")]
-    PaymentError(#[from] PaymentServiceError),
-    
+
     #[error("Repository error: {0}")]
     RepositoryError(#[from] RepositoryError),
     
@@ -47,6 +47,9 @@ pub enum RegistrationError {
     
     #[error("External service error: {0}")]
     ExternalServiceError(String),
+
+    #[error("Hospital admin BVN and NIN must both be verified before approval")]
+    IdentityNotVerified,
 }
 
 /// Result type for hospital registration
@@ -59,61 +62,62 @@ pub struct HospitalRegistrationResult {
 }
 
 /// Core service orchestrating the complete hospital registration workflow
-/// Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 2.1, 2.2, 2.3, 3.1, 3.2, 4.3, 4.4, 10.1
 pub struct RegistrationService {
     hospital_repo: Arc<HospitalRepository>,
     location_service: Arc<LocationService>,
-    payment_service: Arc<PaymentService>,
     audit_service: Arc<AuditService>,
     email_outbox: Arc<EmailOutboxService>,
+    wallet_service: Arc<WalletService>,
     db_pool: PgPool,
+    identity_service: Arc<IdentityVerificationService>,
 }
 
 impl RegistrationService {
     pub fn new(
         hospital_repo: Arc<HospitalRepository>,
         location_service: Arc<LocationService>,
-        payment_service: Arc<PaymentService>,
         audit_service: Arc<AuditService>,
         email_outbox: Arc<EmailOutboxService>,
+        wallet_service: Arc<WalletService>,
         db_pool: PgPool,
+        identity_service: Arc<IdentityVerificationService>,
     ) -> Self {
         Self {
             hospital_repo,
             location_service,
-            payment_service,
             audit_service,
             email_outbox,
+            wallet_service,
             db_pool,
+            identity_service,
         }
     }
 
     /// Register a new hospital with complete workflow
-    /// 
-    /// Orchestrates the complete registration workflow including validation, hospital creation,
-    /// location geocoding, payment tokenization, and audit logging. All operations are wrapped
-    /// in a database transaction for atomicity.
-    /// 
-    /// Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 2.1, 2.2, 2.3, 3.1, 3.2, 10.1
     pub async fn register_hospital(
         &self,
         user_id: Uuid,
         request: HospitalRegistrationRequest,
     ) -> Result<HospitalRegistrationResult, RegistrationError> {
+        // Normalise the email so capitalisation differences can't smuggle
+        let mut request = request;
+        request.email = request.email.trim().to_lowercase();
         self.validate_registration_data(&request)?;
 
-        if self.check_duplicate_registration(&request.email).await? {
+        // Reject if this email already belongs to ANY user (hospital admin,
+        let user_exists: Option<(uuid::Uuid,)> =
+            sqlx::query_as("SELECT id FROM users WHERE email = $1")
+                .bind(&request.email)
+                .fetch_optional(&self.db_pool)
+                .await?;
+        if user_exists.is_some() || self.check_duplicate_registration(&request.email).await? {
             return Err(RegistrationError::DuplicateRegistration(request.email.clone()));
         }
 
-        let mut tx = self.db_pool.begin().await?;
+        let mut tx = self.db_pool.begin(). await?;
 
         let new_hospital = NewHospital {
-            name: request.hospital_name.clone(),
-            email: request.email.clone(),
-            phone: request.phone.clone(),
-            registration_number: request.registration_number.clone(),
-            admin_user_id: None,
+            name: request.hospital_name.clone(), email: request.email.clone(), phone: request.phone.clone(), registration_number: request.registration_number.clone(), admin_user_id: None,
         };
 
         let hospital = self.hospital_repo.create(&mut tx, new_hospital).await?;
@@ -124,26 +128,33 @@ impl RegistrationService {
             .geocode_and_store(&mut tx, hospital_id, request.address.clone())
             .await?;
 
-        let idempotency_key = Some(format!("reg-{}-{}", hospital_id, user_id));
-        
-        let _payment_method = self
-            .payment_service
-            .tokenize_and_store(
-                &mut tx,
-                hospital_id,
-                request.payment_details.clone(),
-                None,
-                idempotency_key,
-            )
+        // Create the hospital-admin user row so they can log in via OTP after
+        let admin_user_id: Uuid = sqlx::query_scalar(
+            r#"
+            INSERT INTO users (hospital_id, first_name, last_name, email, phone, role, is_active)
+            VALUES ($1, $2, $3, $4, $5, 'hospital_admin', FALSE)
+            RETURNING id
+            "#,
+        )
+        .bind(hospital_id)
+        .bind(&request.admin_first_name)
+        .bind(&request.admin_last_name)
+        .bind(&request.email)
+        .bind(&request.phone)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        // Link the hospital row back to its admin user.
+        sqlx::query("UPDATE hospitals SET admin_user_id = $1 WHERE id = $2")
+            .bind(admin_user_id)
+            .bind(hospital_id)
+            .execute(&mut *tx)
             .await?;
 
-        tx.commit().await?;
+        tx.commit(). await?;
 
         let registration_details = RegistrationDetails {
-            hospital_name: request.hospital_name.clone(),
-            email: request.email.clone(),
-            registration_number: request.registration_number.clone(),
-        };
+            hospital_name: request.hospital_name.clone(), email: request.email.clone(), registration_number: request.registration_number.clone(), };
 
         if let Err(e) = self
             .audit_service
@@ -167,97 +178,80 @@ impl RegistrationService {
         Ok(HospitalRegistrationResult {
             hospital_id,
             status: RegistrationStatus::Pending,
-            message: "Hospital registration submitted successfully. Awaiting admin approval.".to_string(),
-            next_steps: vec![
-                "Upload required documents (license, accreditation)".to_string(),
-                "Wait for system administrator review".to_string(),
-                "You will receive an email notification upon approval".to_string(),
-            ],
+            message: "Hospital registration submitted successfully. Awaiting admin approval.".to_string(), next_steps: vec![
+                "Upload required documents (license, accreditation)".to_string(), "Wait for system administrator review".to_string(), "You will receive an email notification upon approval".to_string(), ],
         })
     }
 
     /// Validate registration data
-    /// Requirements: 1.2, 6.1, 6.2
     fn validate_registration_data(
         &self,
         request: &HospitalRegistrationRequest,
     ) -> Result<(), RegistrationError> {
         // Validate hospital name
-        if request.hospital_name.trim().is_empty() {
+        if request.hospital_name.trim(). is_empty() {
             return Err(RegistrationError::ValidationError(
-                "Hospital name cannot be empty".to_string(),
-            ));
+                "Hospital name cannot be empty".to_string(), ));
         }
 
         if request.hospital_name.len() < 2 || request.hospital_name.len() > 200 {
             return Err(RegistrationError::ValidationError(
-                "Hospital name must be between 2 and 200 characters".to_string(),
-            ));
+                "Hospital name must be between 2 and 200 characters".to_string(), ));
         }
 
         // Validate email (RFC 5322)
         if validate_email_rfc5322(&request.email).is_err() {
             return Err(RegistrationError::ValidationError(
-                "Invalid email format (must conform to RFC 5322)".to_string(),
-            ));
+                "Invalid email format (must conform to RFC 5322)".to_string(), ));
         }
 
         // Validate phone (E.164)
         if validate_phone_e164(&request.phone).is_err() {
             return Err(RegistrationError::ValidationError(
-                "Invalid phone format (must conform to E.164)".to_string(),
-            ));
+                "Invalid phone format (must conform to E.164)".to_string(), ));
         }
 
         // Validate registration number
-        if request.registration_number.trim().is_empty() {
+        if request.registration_number.trim(). is_empty() {
             return Err(RegistrationError::ValidationError(
-                "Registration number cannot be empty".to_string(),
-            ));
+                "Registration number cannot be empty".to_string(), ));
         }
 
         if request.registration_number.len() < 5 || request.registration_number.len() > 50 {
             return Err(RegistrationError::ValidationError(
-                "Registration number must be between 5 and 50 characters".to_string(),
-            ));
+                "Registration number must be between 5 and 50 characters".to_string(), ));
         }
 
         // Validate address
-        if request.address.line1.trim().is_empty() {
+        if request.address.line1.trim(). is_empty() {
             return Err(RegistrationError::ValidationError(
-                "Address line 1 cannot be empty".to_string(),
-            ));
+                "Address line 1 cannot be empty".to_string(), ));
         }
 
-        if request.address.city.trim().is_empty() {
+        if request.address.city.trim(). is_empty() {
             return Err(RegistrationError::ValidationError(
-                "City cannot be empty".to_string(),
-            ));
+                "City cannot be empty".to_string(), ));
         }
 
-        if request.address.state.trim().is_empty() {
+        if request.address.state.trim(). is_empty() {
             return Err(RegistrationError::ValidationError(
-                "State cannot be empty".to_string(),
-            ));
+                "State cannot be empty".to_string(), ));
         }
 
-        if request.address.postal_code.trim().is_empty() {
+        if request.address.postal_code.trim(). is_empty() {
             return Err(RegistrationError::ValidationError(
-                "Postal code cannot be empty".to_string(),
-            ));
+                "Postal code cannot be empty".to_string(), ));
         }
 
-        if request.address.country.trim().is_empty() {
+        if request.address.country.trim(). is_empty() {
             return Err(RegistrationError::ValidationError(
-                "Country cannot be empty".to_string(),
-            ));
+                "Country cannot be empty".to_string(), ));
         }
 
         Ok(())
     }
 
     /// Check if a hospital with the given email already exists
-    /// Requirements: 10.1
     async fn check_duplicate_registration(&self, email: &str) -> Result<bool, RegistrationError> {
         match self.hospital_repo.find_by_email(email).await? {
             Some(_) => Ok(true),
@@ -266,20 +260,13 @@ impl RegistrationService {
     }
 
     /// Approve a pending hospital registration
-    /// Requirements: 4.3, 4.5, 5.1, 5.2, 10.4
-    /// 
-    /// This method:
-    /// 1. Updates hospital status to 'approved'
-    /// 2. Logs status change in audit trail
-    /// 3. Queues approval notification email
-    /// 4. Prevents concurrent approvals using database transaction
     pub async fn approve_hospital(
         &self,
         hospital_id: Uuid,
         admin_id: Option<Uuid>,
         notes: Option<String>,
     ) -> Result<(), RegistrationError> {
-        let mut tx = self.db_pool.begin().await?;
+        let mut tx = self.db_pool.begin(). await?;
 
         let hospital = self
             .hospital_repo
@@ -294,6 +281,16 @@ impl RegistrationService {
             ));
         }
 
+        // Gate: the hospital admin's BVN and NIN must both be verified
+        let identity_verified = self
+            .identity_service
+            .both_verified(IdentityOwner::Hospital, hospital_id)
+            .await
+            .map_err(|e| RegistrationError::ExternalServiceError(e.to_string()))?;
+        if !identity_verified {
+            return Err(RegistrationError::IdentityNotVerified);
+        }
+
         self.hospital_repo
             .update_status(
                 &mut tx,
@@ -304,7 +301,21 @@ impl RegistrationService {
             )
             .await?;
 
-        tx.commit().await?;
+        // Activate the admin user row so OTP login starts working. We created
+        sqlx::query(
+            r#"
+            UPDATE users
+               SET is_active = TRUE,
+                   updated_at = NOW()
+             WHERE hospital_id = $1
+               AND role = 'hospital_admin'
+            "#,
+        )
+        .bind(hospital_id)
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit(). await?;
 
         if let Err(e) = self
             .audit_service
@@ -331,35 +342,49 @@ impl RegistrationService {
             eprintln!("Warning: Failed to queue approval email: {}", e);
         }
 
+        // provision the hospital's SafeHaven sub-account, passing the verified BVN
+        let verified_bvn = self
+            .identity_service
+            .decrypted_number(IdentityOwner::Hospital, hospital_id, IdentityKind::Bvn)
+            .await
+            .unwrap_or(None);
+        if let Err(e) = self
+            .wallet_service
+            .ensure_sub_account(
+                hospital_id,
+                &hospital.phone_number,
+                &hospital.email,
+                "BVN",
+                verified_bvn.as_deref(),
+            )
+            .await
+        {
+            eprintln!(
+                "Warning: Failed to provision SafeHaven sub-account for hospital {}: {}",
+                hospital_id, e
+            );
+        }
+
         Ok(())
     }
     /// Reject a pending hospital registration
-    /// Requirements: 4.4, 4.5, 5.4
-    /// Reject a hospital registration
-    /// 
-    /// Updates hospital status to rejected with reason, logs the change in audit trail,
-    /// and queues a rejection email. Validates rejection reason length (10-500 chars).
-    /// 
-    /// Requirements: 4.1, 4.2, 4.3, 4.4, 4.5
     pub async fn reject_hospital(
         &self,
         hospital_id: Uuid,
         admin_id: Option<Uuid>,
         reason: String,
     ) -> Result<(), RegistrationError> {
-        if reason.trim().is_empty() {
+        if reason.trim(). is_empty() {
             return Err(RegistrationError::ValidationError(
-                "Rejection reason cannot be empty".to_string(),
-            ));
+                "Rejection reason cannot be empty".to_string(), ));
         }
 
         if reason.len() < 10 || reason.len() > 500 {
             return Err(RegistrationError::ValidationError(
-                "Rejection reason must be between 10 and 500 characters".to_string(),
-            ));
+                "Rejection reason must be between 10 and 500 characters".to_string(), ));
         }
 
-        let mut tx = self.db_pool.begin().await?;
+        let mut tx = self.db_pool.begin(). await?;
 
         let hospital = self
             .hospital_repo
@@ -384,7 +409,7 @@ impl RegistrationService {
             )
             .await?;
 
-        tx.commit().await?;
+        tx.commit(). await?;
 
         if let Err(e) = self
             .audit_service
@@ -415,7 +440,6 @@ impl RegistrationService {
     }
 
     /// Get registration status for a hospital
-    /// Requirements: 4.2
     pub async fn get_registration_status(
         &self,
         hospital_id: Uuid,
@@ -438,7 +462,6 @@ impl RegistrationService {
     }
 
     /// List all hospitals with optional status filter and pagination
-    /// Requirements: 4.2
     pub async fn list_hospitals(
         &self,
         status_filter: Option<RegistrationStatus>,
@@ -463,8 +486,7 @@ impl RegistrationService {
         let total_pages = (total as f64 / page_size as f64).ceil() as i64;
 
         Ok(HospitalListResponse {
-            hospitals: hospitals.into_iter().map(HospitalSummary::from).collect(),
-            pagination: PaginationMetadata {
+            hospitals: hospitals.into_iter(). map(HospitalSummary::from).collect(), pagination: PaginationMetadata {
                 current_page: page,
                 page_size,
                 total_items: total,
@@ -545,15 +567,4 @@ mod tests {
     }
 
     // Property tests will be implemented in Task 10.5 (integration tests)
-    // These require database setup and are better suited for integration testing
-    // 
-    // Property 1: New registrations start pending
-    // Property 15: Admin access to registration data
-    // Property 16: Approval status transition
-    // Property 17: Rejection status transition
-    // Property 39: Duplicate registration prevention
-    // Property 40: Concurrent status update safety
-    // Property 41: Payment tokenization idempotency
-    // Property 42: Concurrent approval prevention
-    // Property 43: Transaction rollback on constraint violations
 }
