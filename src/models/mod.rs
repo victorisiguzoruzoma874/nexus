@@ -9,4 +9,5 @@ pub mod billing;
 pub mod clinician;
 pub mod clinician_registration;
 pub mod shift;
+pub mod wallet;
 pub mod email_outbox;

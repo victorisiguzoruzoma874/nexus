@@ -9,4 +9,4 @@ pub mod services;
 
 // Re-export commonly used items
 pub use utils::{AppConfig, validation};
-pub use services::{GeocodingClient, PaystackClient, EncryptionService, EmailOutboxService};
+pub use services::{GeocodingClient, SafeHavenClient, EncryptionService, EmailOutboxService};

@@ -23,6 +23,10 @@ pub enum AppError {
     #[error("Forbidden: {0}")]
     Forbidden(String),
 
+    /// HTTP 402 — used when a hospital tries to create a shift without
+    #[error("Payment required: {0}")]
+    PaymentRequired(String),
+
     #[error("Database error: {0}")]
     Database(#[from] sqlx::Error),
 
@@ -38,6 +42,7 @@ impl IntoResponse for AppError {
             AppError::Validation(msg) => (StatusCode::UNPROCESSABLE_ENTITY, msg.clone()),
             AppError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg.clone()),
             AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg.clone()),
+            AppError::PaymentRequired(msg) => (StatusCode::PAYMENT_REQUIRED, msg.clone()),
             AppError::Database(e) => {
                 tracing::error!("Database error: {:?}", e);
                 (StatusCode::INTERNAL_SERVER_ERROR, "A database error occurred".to_string())

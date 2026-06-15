@@ -52,7 +52,7 @@ pub async fn list_hospitals_admin(
     Query(params): Query<ListHospitalsQuery>,
 ) -> Result<Json<HospitalListResponse>, (StatusCode, Json<RegistrationErrorResponse>)> {
     let status_filter = if let Some(status_str) = params.status {
-        match status_str.to_lowercase().as_str() {
+        match status_str.to_lowercase(). as_str() {
             "pending" => Some(RegistrationStatus::Pending),
             "approved" => Some(RegistrationStatus::Approved),
             "rejected" => Some(RegistrationStatus::Rejected),
@@ -60,9 +60,7 @@ pub async fn list_hospitals_admin(
                 return Err((
                     StatusCode::BAD_REQUEST,
                     Json(RegistrationErrorResponse {
-                        code: "INVALID_STATUS".to_string(),
-                        message: "Status must be one of: pending, approved, rejected".to_string(),
-                    }),
+                        code: "INVALID_STATUS".to_string(), message: "Status must be one of: pending, approved, rejected".to_string(), }),
                 ));
             }
         }
@@ -82,9 +80,7 @@ pub async fn list_hospitals_admin(
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(RegistrationErrorResponse {
-                code: "ERROR".to_string(),
-                message: e.to_string(),
-            }),
+                code: "ERROR".to_string(), message: e.to_string(), }),
         )),
     }
 }
@@ -119,9 +115,7 @@ pub async fn list_clinicians_admin(
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(RegistrationErrorResponse {
-                    code: "ERROR".to_string(),
-                    message: e.to_string(),
-                }),
+                    code: "ERROR".to_string(), message: e.to_string(), }),
             )
         })?;
 
@@ -133,9 +127,7 @@ pub async fn list_clinicians_admin(
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(RegistrationErrorResponse {
-                    code: "ERROR".to_string(),
-                    message: e.to_string(),
-                }),
+                    code: "ERROR".to_string(), message: e.to_string(), }),
             )
         })?;
 

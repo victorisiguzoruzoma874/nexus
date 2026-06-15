@@ -16,7 +16,6 @@ pub enum VerificationStatus {
 }
 
 /// Registration step in the 4-step onboarding flow matching the UI labels:
-/// Step 1: Profile Setup  → Step 2: Credentials  → Step 3: Verification  → Step 4: Access Granted
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "registration_step", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
@@ -54,10 +53,8 @@ pub struct Hospital {
     /// User ID of the hospital admin who initiated registration
     pub admin_user_id: Option<Uuid>,
     /// Timestamp when documents were submitted for compliance review (Step 3).
-    /// Used to track the 24-48 business hour verification window.
     pub legal_submitted_at: Option<DateTime<Utc>>,
     /// Overall setup progress percentage (0–100) shown in the progress bar.
-    /// Incremented as the hospital completes each setup section.
     pub setup_progress_percent: i16,
     /// Optional logo/profile image URL
     pub logo_url: Option<String>,

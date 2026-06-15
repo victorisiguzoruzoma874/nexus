@@ -3,14 +3,9 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
 
-// ---------------------------------------------------------------------------
 // Enums
-// ---------------------------------------------------------------------------
 
 /// A discrete action a hospital can attempt on the platform.
-/// Shown on the Verification Pending screen:
-///   - Read-Only Mode: browse app, view doctor profiles, explore system tools
-///   - Action Restricted: new shifts and contract approvals disabled until verified
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "hospital_action", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
@@ -37,12 +32,9 @@ pub enum AccessLevel {
     Hidden,
 }
 
-// ---------------------------------------------------------------------------
 // Hospital access policy
-// ---------------------------------------------------------------------------
 
 /// Defines what a hospital is allowed to do at a given verification status.
-/// One row per (verification_status, action) pair — seeded at startup.
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct AccessPolicy {
     pub id: Uuid,
@@ -55,12 +47,9 @@ pub struct AccessPolicy {
     pub updated_at: DateTime<Utc>,
 }
 
-// ---------------------------------------------------------------------------
 // Response types
-// ---------------------------------------------------------------------------
 
 /// The resolved access policy for a hospital — what the API returns
-/// so the frontend knows exactly which actions to enable/disable/hide.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HospitalAccessSummary {
     pub hospital_id: Uuid,

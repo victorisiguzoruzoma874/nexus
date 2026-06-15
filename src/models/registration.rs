@@ -5,9 +5,7 @@ use uuid::Uuid;
 use validator::Validate;
 use utoipa::ToSchema;
 
-// ---------------------------------------------------------------------------
 // Registration Status Enum (for hospital admin registration workflow)
-// ---------------------------------------------------------------------------
 
 /// Registration status for hospital admin registration workflow (AC-01 to AC-05)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type, ToSchema)]
@@ -19,9 +17,7 @@ pub enum RegistrationStatus {
     Rejected,
 }
 
-// ---------------------------------------------------------------------------
 // Audit Event Types
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "audit_event_type", rename_all = "snake_case")]
@@ -43,9 +39,7 @@ pub enum ActorType {
     System,
 }
 
-// ---------------------------------------------------------------------------
 // Enums
-// ---------------------------------------------------------------------------
 
 /// The specific type of legal document being uploaded (Step 2 — Legal Verification).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
@@ -93,12 +87,9 @@ pub enum SubmissionStatus {
     Rejected,
 }
 
-// ---------------------------------------------------------------------------
 // Hospital document
-// ---------------------------------------------------------------------------
 
 /// A legal document uploaded by a hospital during Step 2 (Legal Verification).
-/// Each document carries its own credential metadata (reg number, expiry, issuer).
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct HospitalDocument {
     pub id: Uuid,
@@ -114,7 +105,6 @@ pub struct HospitalDocument {
     pub file_size_bytes: Option<i64>,
 
     // --- Credential metadata filled in by the hospital ---
-    /// e.g. "HOSP-4829-X"
     pub credential_number: Option<String>,
     pub expiry_date: Option<NaiveDate>,
     pub issuing_authority: Option<IssuingAuthority>,
@@ -129,9 +119,7 @@ pub struct HospitalDocument {
     pub review_notes: Option<String>,
 }
 
-// ---------------------------------------------------------------------------
 // Request / response types
-// ---------------------------------------------------------------------------
 
 /// Payload for uploading a single legal document (Step 2).
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
@@ -204,9 +192,7 @@ impl From<HospitalDocument> for HospitalDocumentResponse {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Registration audit log
-// ---------------------------------------------------------------------------
 
 /// Immutable record of every registration step transition for a hospital.
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -221,12 +207,9 @@ pub struct RegistrationAuditLog {
     pub created_at: DateTime<Utc>,
 }
 
-// ---------------------------------------------------------------------------
 // Onboarding notifications
-// ---------------------------------------------------------------------------
 
 /// Channel through which a status-change notification is delivered.
-/// Shown on Step 3: "You will receive an SMS and email notification once your status changes."
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "notification_channel", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
@@ -282,7 +265,6 @@ pub struct OnboardingNotification {
 }
 
 /// Notification preferences stored per hospital.
-/// Controls which channels are active for each event type.
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct HospitalNotificationPreferences {
     pub id: Uuid,

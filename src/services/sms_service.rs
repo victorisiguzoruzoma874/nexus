@@ -47,7 +47,9 @@ impl SmsService {
         }
     }
 
-    /// Send a 6-digit OTP via SMS. In mock mode, logs the code instead.
+    /// Send a 6-digit OTP via SMS. In mock mode, logs the code instead
+
+
     pub async fn send_otp(&self, phone: &str, code: &str) -> Result<(), SmsError> {
         let message = format!("Your NexusCare verification code is {}. Valid for 10 minutes.", code);
 
@@ -66,14 +68,13 @@ impl SmsService {
             api_key: &self.api_key,
         };
 
-        let resp = self.client.post(&url).json(&body).send().await?;
+        let resp = self.client.post(&url).json(&body).send(). await?;
 
-        if !resp.status().is_success() {
-            let text = resp.text().await.unwrap_or_default();
-            return Err(SmsError::DeliveryFailed(text));
+        if !resp.status(). is_success() {
+            let text = resp.text(). await.unwrap_or_default(); return Err(SmsError::DeliveryFailed(text));
         }
 
-        let parsed: TermiiResponse = resp.json().await.unwrap_or(TermiiResponse {
+        let parsed: TermiiResponse = resp.json(). await.unwrap_or(TermiiResponse {
             code: None,
             message: None,
         });
