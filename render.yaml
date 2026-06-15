@@ -1,0 +1,40 @@
+# Render Blueprint for NexusCare backend (Axum + SQLx/Postgres)
+# Docs: https://render.com/docs/blueprint-spec
+#
+# Boot requirements (see src/utils/config.rs): DATABASE_URL + JWT_SECRET.
+# Migrations in ./migrations run automatically on startup (src/main.rs).
+# The app binds to $PORT (injected by Render); see src/utils/config.rs.
+
+databases:
+  - name: nexuscare-db
+    plan: free
+    region: oregon
+    databaseName: nexuscare
+    user: nexuscare
+
+services:
+  - type: web
+    name: nexuscare-backend
+    runtime: rust
+    plan: free
+    region: oregon
+    branch: main
+    buildCommand: cargo build --release --locked
+    startCommand: ./target/release/nexuscare_backend
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: nexuscare-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: SERVER_HOST
+        value: "0.0.0.0"
+      - key: APP_ENV
+        value: production
+      - key: ENABLE_API_DOCS
+        value: "true"
+      - key: RUST_LOG
+        value: "nexuscare_backend=info,tower_http=info,sqlx=warn"
