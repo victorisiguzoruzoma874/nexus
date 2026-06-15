@@ -8,10 +8,11 @@ use crate::models::clinician_registration::{
     ProfileResponse, SendOtpResponse, VerifyOtpResponse,
 };
 use crate::repositories::clinician::{ClinicianRepoError, ClinicianRepository};
-use crate::services::paystack::{PaystackClient, PaystackError};
+use crate::services::safehaven::{SafeHavenClient, SafeHavenError};
 use crate::services::encryption::EncryptionService;
 use crate::services::email_outbox_service::{EmailOutboxError, EmailOutboxService};
 use crate::services::email_templates;
+use crate::services::identity_verification_service::{IdentityOwner, IdentityVerificationService};
 use crate::utils::validation::validate_email_rfc5322;
 
 #[derive(Debug, thiserror::Error)]
@@ -24,8 +25,8 @@ pub enum ClinicianRegistrationError {
     Validation(String),
     #[error("Email queue error: {0}")]
     EmailQueue(#[from] EmailOutboxError),
-    #[error("Payment error: {0}")]
-    Payment(#[from] PaystackError),
+    #[error("Payment provider error: {0}")]
+    Payment(#[from] SafeHavenError),
     #[error("Database error: {0}")]
     Database(#[from] sqlx::Error),
     #[error("Repository error: {0}")]
@@ -34,38 +35,43 @@ pub enum ClinicianRegistrationError {
     Encryption(String),
     #[error("Clinician not found")]
     NotFound,
+    #[error("BVN and NIN must both be verified before adding a bank account")]
+    IdentityNotVerified,
 }
 
 pub struct ClinicianRegistrationService {
     repo: Arc<ClinicianRepository>,
     email_outbox: Arc<EmailOutboxService>,
-    paystack: Arc<PaystackClient>,
+    safehaven: Arc<SafeHavenClient>,
     encryption: Arc<EncryptionService>,
     pool: PgPool,
+    identity_service: Arc<IdentityVerificationService>,
 }
 
 impl ClinicianRegistrationService {
     pub fn new(
         repo: Arc<ClinicianRepository>,
         email_outbox: Arc<EmailOutboxService>,
-        paystack: Arc<PaystackClient>,
+        safehaven: Arc<SafeHavenClient>,
         encryption: Arc<EncryptionService>,
         pool: PgPool,
+        identity_service: Arc<IdentityVerificationService>,
     ) -> Self {
-        Self { repo, email_outbox, paystack, encryption, pool }
+        Self { repo, email_outbox, safehaven, encryption, pool, identity_service }
     }
 
-    // -----------------------------------------------------------------------
-    // AC-01: Send OTP
-    // -----------------------------------------------------------------------
+    // Send OTP
     pub async fn send_otp(
         &self,
         email: &str,
     ) -> Result<SendOtpResponse, ClinicianRegistrationError> {
+        // Normalise the email (trim + lowercase) so capitalisation differences
+        let email = email.trim().to_lowercase();
+        let email = email.as_str();
         validate_email_rfc5322(email)
             .map_err(|e| ClinicianRegistrationError::Validation(e.to_string()))?;
 
-        // AC-05: Duplicate prevention
+        // Duplicate prevention — an email already on any users row
         if self.repo.email_exists(email).await? {
             return Err(ClinicianRegistrationError::DuplicateEmail);
         }
@@ -87,13 +93,10 @@ impl ClinicianRegistrationService {
         self.email_outbox.enqueue_email(email, &content).await?;
 
         Ok(SendOtpResponse {
-            message: "OTP sent successfully".to_string(),
-        })
+            message: "OTP sent successfully".to_string(), })
     }
 
-    // -----------------------------------------------------------------------
-    // AC-02: Verify OTP → create account → return JWT
-    // -----------------------------------------------------------------------
+    // Verify OTP → create account → return JWT
     pub async fn verify_otp(
         &self,
         email: &str,
@@ -122,9 +125,9 @@ impl ClinicianRegistrationService {
             .await?;
 
         // Create user + clinician in a transaction
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.pool.begin(). await?;
         let clinician_id = self.repo.create_clinician(&mut tx, email).await?;
-        tx.commit().await?;
+        tx.commit(). await?;
 
         let token = issue_jwt(clinician_id);
 
@@ -134,27 +137,22 @@ impl ClinicianRegistrationService {
         Ok(VerifyOtpResponse {
             clinician_id,
             access_token: token,
-            message: "Account created successfully".to_string(),
-        })
+            message: "Account created successfully".to_string(), })
     }
 
-    // -----------------------------------------------------------------------
-    // AC-03: Complete profile
-    // -----------------------------------------------------------------------
+    // Complete profile
     pub async fn complete_profile(
         &self,
         clinician_id: Uuid,
         req: CompleteProfileRequest,
     ) -> Result<ProfileResponse, ClinicianRegistrationError> {
-        if req.first_name.trim().is_empty() || req.last_name.trim().is_empty() {
+        if req.first_name.trim(). is_empty() || req.last_name.trim(). is_empty() {
             return Err(ClinicianRegistrationError::Validation(
-                "Full name is required".to_string(),
-            ));
+                "Full name is required".to_string(), ));
         }
-        if req.license_number.trim().is_empty() {
+        if req.license_number.trim(). is_empty() {
             return Err(ClinicianRegistrationError::Validation(
-                "License number is required".to_string(),
-            ));
+                "License number is required".to_string(), ));
         }
 
         self.repo
@@ -188,18 +186,26 @@ impl ClinicianRegistrationService {
         })
     }
 
-    // -----------------------------------------------------------------------
-    // AC-04: Add bank account (Paystack validation)
-    // -----------------------------------------------------------------------
+    // Add bank account (SafeHaven name-enquiry validation)
     pub async fn add_bank_account(
         &self,
         clinician_id: Uuid,
         req: AddBankAccountRequest,
     ) -> Result<BankAccountResponse, ClinicianRegistrationError> {
-        // Validate with Paystack
+        // Gate: both BVN and NIN must be verified before linking a payout account
+        let verified = self
+            .identity_service
+            .both_verified(IdentityOwner::Clinician, clinician_id)
+            .await
+            .map_err(|e| ClinicianRegistrationError::Validation(e.to_string()))?;
+        if !verified {
+            return Err(ClinicianRegistrationError::IdentityNotVerified);
+        }
+
+        // Validate with SafeHaven (returns account holder name + sessionId).
         let resolved = self
-            .paystack
-            .resolve_bank_account(&req.account_number, &req.bank_code)
+            .safehaven
+            .name_enquiry(&req.bank_code, &req.account_number)
             .await?;
 
         // Encrypt account number before storage
@@ -222,9 +228,7 @@ impl ClinicianRegistrationService {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 fn generate_otp() -> String {
     // Use 4 bytes from a random UUID to produce a 6-digit code
@@ -258,21 +262,17 @@ fn issue_jwt(clinician_id: Uuid) -> String {
     let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "dev_secret".to_string());
     let now = Utc::now().timestamp() as usize;
     let claims = Claims {
-        sub: clinician_id.to_string(),
-        role: "staff".to_string(),
-        exp: now + 86400,
+        sub: clinician_id.to_string(), role: "staff".to_string(), exp: now + 86400,
         iat: now,
     };
 
     encode(
-        &Header::default(),
-        &claims,
+        &Header::default(), &claims,
         &EncodingKey::from_secret(secret.as_bytes()),
     )
     .unwrap_or_else(|_| "token_error".to_string())
 }
 
-// ---------------------------------------------------------------------------
 // Extend ClinicianRepository with a reverse lookup helper is in repositories/clinician.rs
 
 #[cfg(test)]
@@ -332,23 +332,27 @@ mod tests {
         assert!(validate_phone_e164("not-a-phone").is_err());
     }
 
-    // --- Bank account validation (Paystack mock) ---
+    // --- Bank account validation (SafeHaven mock) ---
 
-    #[tokio::test]
-    async fn paystack_mock_resolves_bank_account() {
-        use crate::services::paystack::PaystackClient;
-        let client = PaystackClient::new("sk_test_dummy".to_string(), None);
-        let result = client.resolve_bank_account("0123456789", "058").await;
-        assert!(result.is_ok(), "Mock should succeed: {:?}", result);
-        let resolved = result.unwrap();
-        assert!(!resolved.account_name.is_empty());
+    fn mock_safehaven() -> crate::services::safehaven::SafeHavenClient {
+        crate::services::safehaven::SafeHavenClient::new(
+            String::new(), "test-client".to_string(), "test-ibs".to_string(), "0000000000".to_string(), "090286".to_string(), )
     }
 
     #[tokio::test]
-    async fn paystack_mock_returns_account_number() {
-        use crate::services::paystack::PaystackClient;
-        let client = PaystackClient::new("sk_test_dummy".to_string(), None);
-        let result = client.resolve_bank_account("0123456789", "058").await.unwrap();
+    async fn safehaven_mock_resolves_bank_account() {
+        let client = mock_safehaven();
+        let result = client.name_enquiry("058", "0123456789").await;
+        assert!(result.is_ok(), "Mock should succeed: {:?}", result);
+        let resolved = result.unwrap();
+        assert!(!resolved.account_name.is_empty());
+        assert!(resolved.session_id.is_some(), "must surface sessionId");
+    }
+
+    #[tokio::test]
+    async fn safehaven_mock_returns_account_number() {
+        let client = mock_safehaven();
+        let result = client.name_enquiry("058", "0123456789").await.unwrap();
         assert_eq!(result.account_number, "0123456789");
     }
 }
