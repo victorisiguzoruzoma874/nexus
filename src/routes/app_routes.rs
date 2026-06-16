@@ -32,10 +32,10 @@ use crate::services::{
     clinician_registration_service::ClinicianRegistrationService,
     distance_service::DistanceService, email_outbox_service::EmailOutboxService,
     encryption::EncryptionService, geocoding::GeocodingClient, here_maps::HereMapsClient,
-    identity_verification_service::IdentityVerificationService,
-    location_service::LocationService, notification_service::NotificationService,
-    payout_service::PayoutService, registration_service::RegistrationService,
-    safehaven::SafeHavenClient, shift_service::ShiftService, wallet_service::WalletService,
+    identity_verification_service::IdentityVerificationService, location_service::LocationService,
+    notification_service::NotificationService, payout_service::PayoutService,
+    registration_service::RegistrationService, safehaven::SafeHavenClient,
+    shift_service::ShiftService, wallet_service::WalletService,
 };
 
 /// Shared application state
@@ -245,6 +245,34 @@ pub struct AppState {
             crate::services::registration_service::HospitalListResponse,
             crate::services::registration_service::HospitalSummary,
             crate::services::registration_service::PaginationMetadata,
+            // Location & HERE Maps models
+            crate::models::here_maps::FacilitySearchResponse,
+            crate::models::here_maps::AddressAutocompleteResponse,
+            crate::models::here_maps::Facility,
+            crate::models::here_maps::AddressSuggestion,
+            crate::models::here_maps::Position,
+            crate::models::here_maps::ContactInfo,
+            crate::handlers::location::FacilitySearchParams,
+            crate::handlers::location::AutocompleteParams,
+            crate::handlers::location::NearbyShiftsResponse,
+            crate::handlers::location::FacilityWithShifts,
+            crate::handlers::location::SimpleShift,
+            // HERE Maps geocoding models
+            crate::handlers::here_maps::GeocodeResponse,
+            crate::handlers::here_maps::GeocodeItem,
+            crate::handlers::here_maps::GeocodePosition,
+            crate::handlers::here_maps::ReverseGeocodeResponse,
+            crate::handlers::here_maps::ReverseGeocodeItem,
+            crate::handlers::here_maps::AddressDetails,
+            // Distance calculation models
+            crate::models::distance::DistanceRequest,
+            crate::models::distance::DistanceResponse,
+            crate::models::distance::LocationInput,
+            crate::models::distance::LocationType,
+            crate::models::distance::LocationDetails,
+            crate::models::distance::DistanceInfo,
+            crate::models::distance::TimeInfo,
+            crate::models::distance::RouteSummary,
         )
     ),
     info(
@@ -266,6 +294,7 @@ pub struct AppState {
         (name = "hospitals", description = "Hospital management endpoints"),
         (name = "clinicians", description = "Clinician registration and management endpoints"),
         (name = "shifts", description = "Shift creation and management endpoints"),
+        (name = "location", description = "Location services — nearby facilities, address autocomplete, HERE Maps integration"),
         (name = "admin", description = "Admin-only endpoints"),
         (name = "wallet", description = "Hospital wallet — balance, deposits, ledger (Tier 2)"),
         (name = "webhooks", description = "Inbound webhooks from external providers (SafeHaven)"),
@@ -337,7 +366,7 @@ pub fn create_router(
     let here_api_key = std::env::var("HERE_API_KEY").unwrap_or_default();
     let here_maps_client = Arc::new(HereMapsClient::new(here_api_key));
     let distance_service = Arc::new(DistanceService::new(here_maps_client.clone(), true));
-    
+
     let location_service = Arc::new(LocationService::new(
         geocoding_client.clone(),
         location_repo.clone(),

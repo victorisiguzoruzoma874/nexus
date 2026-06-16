@@ -13,13 +13,13 @@ pub struct GeocodeResponse {
 
 #[derive(Debug, serde::Serialize, utoipa::ToSchema)]
 pub struct GeocodeItem {
-    pub position: Position,
+    pub position: GeocodePosition,
     pub address: AddressDetails,
     pub title: String,
 }
 
 #[derive(Debug, serde::Serialize, utoipa::ToSchema)]
-pub struct Position {
+pub struct GeocodePosition {
     pub lat: f64,
     pub lng: f64,
 }
@@ -42,7 +42,7 @@ pub struct ReverseGeocodeResponse {
 pub struct ReverseGeocodeItem {
     pub title: String,
     pub address: AddressDetails,
-    pub position: Position,
+    pub position: GeocodePosition,
 }
 
 #[derive(Debug, Deserialize)]
@@ -63,7 +63,7 @@ pub struct ReverseGeocodeParams {
 #[utoipa::path(
     get,
     path = "/api/v1/here/geocode",
-    tag = "Maps",
+    tag = "location",
     summary = "Geocode address to coordinates",
     description = "Convert address string to latitude/longitude coordinates using HERE Maps API",
     params(
@@ -132,7 +132,7 @@ pub async fn geocode_address(
             let pos = &item["position"];
             let addr = &item["address"];
             GeocodeItem {
-                position: Position {
+                position: GeocodePosition {
                     lat: pos["lat"].as_f64().unwrap_or(0.0),
                     lng: pos["lng"].as_f64().unwrap_or(0.0),
                 },
@@ -155,7 +155,7 @@ pub async fn geocode_address(
 #[utoipa::path(
     get,
     path = "/api/v1/here/reverse-geocode",
-    tag = "Maps",
+    tag = "location",
     summary = "Reverse geocode coordinates to address", 
     description = "Convert latitude/longitude coordinates to human-readable address using HERE Maps API",
     params(
@@ -231,7 +231,7 @@ pub async fn reverse_geocode(
             let addr = &item["address"];
             ReverseGeocodeItem {
                 title: item["title"].as_str().unwrap_or("").to_string(),
-                position: Position {
+                position: GeocodePosition {
                     lat: pos["lat"].as_f64().unwrap_or(lat),
                     lng: pos["lng"].as_f64().unwrap_or(lng),
                 },

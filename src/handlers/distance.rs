@@ -12,6 +12,9 @@ use axum::{extract::State, Json};
 #[utoipa::path(
     post,
     path = "/api/v1/distance/calculate",
+    tag = "location",
+    summary = "Calculate distance between locations",
+    description = "Calculate distance and travel time between two locations using either coordinates or addresses",
     request_body = DistanceRequest,
     responses(
         (status = 200, description = "Distance calculated successfully", body = DistanceResponse),
@@ -19,8 +22,7 @@ use axum::{extract::State, Json};
         (status = 404, description = "Location not found"),
         (status = 422, description = "No route available"),
         (status = 500, description = "Internal server error")
-    ),
-    tag = "Maps"
+    )
 )]
 pub async fn calculate_distance(
     State(state): State<AppState>,

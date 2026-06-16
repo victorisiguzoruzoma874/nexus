@@ -9,12 +9,17 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, utoipa::IntoParams, utoipa::ToSchema)]
 pub struct FacilitySearchParams {
+    /// Search query for facility type (e.g., "hospital", "clinic")
     pub q: Option<String>,
+    /// Latitude coordinate
     pub lat: f64,
+    /// Longitude coordinate  
     pub lng: f64,
+    /// Search radius in meters (max 50000)
     pub radius: Option<i32>,
+    /// Maximum number of results to return
     pub limit: Option<i32>,
 }
 
@@ -43,11 +48,15 @@ pub struct SimpleShift {
     pub is_waitlisted: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::IntoParams, utoipa::ToSchema)]
 pub struct AutocompleteParams {
+    /// Search query string
     pub q: String,
+    /// Latitude coordinate for location bias
     pub lat: f64,
+    /// Longitude coordinate for location bias
     pub lng: f64,
+    /// Search radius in meters
     pub radius: Option<i32>,
 }
 
@@ -55,19 +64,15 @@ pub struct AutocompleteParams {
 #[utoipa::path(
     get,
     path = "/api/v1/location/health-facilities/search",
-    params(
-        ("lat" = f64, Query, description = "Latitude of search center"),
-        ("lng" = f64, Query, description = "Longitude of search center"),
-        ("q" = Option<String>, Query, description = "Optional search filter (defaults to all health facilities)"),
-        ("radius" = Option<i32>, Query, description = "Search radius in meters (default: 5000)"),
-        ("limit" = Option<i32>, Query, description = "Maximum results (default: 20)")
-    ),
+    tag = "location",
+    summary = "Search nearby healthcare facilities",
+    description = "Find healthcare facilities (hospitals, clinics, pharmacies) near a given location using HERE Maps",
+    params(FacilitySearchParams),
     responses(
         (status = 200, description = "Health facilities found", body = FacilitySearchResponse),
         (status = 400, description = "Invalid coordinates or parameters"),
         (status = 500, description = "Service error")
-    ),
-    tag = "Location"
+    )
 )]
 pub async fn search_nearby_facilities(
     State(state): State<AppState>,
@@ -143,15 +148,10 @@ pub async fn search_nearby_facilities(
 #[utoipa::path(
     get,
     path = "/api/v1/location/address/autocomplete",
-    tag = "Location",
+    tag = "location",
     summary = "Address autocomplete",
     description = "Get address suggestions based on partial input using HERE Maps autosuggest",
-    params(
-        ("lat" = f64, Query, description = "Reference latitude", example = 6.5244),
-        ("lng" = f64, Query, description = "Reference longitude", example = 3.3792),
-        ("q" = String, Query, description = "Search query string", example = "Lagos"),
-        ("radius" = Option<i32>, Query, description = "Search radius in meters", example = 5000)
-    ),
+    params(AutocompleteParams),
     responses(
         (status = 200, description = "Address suggestions", body = AddressAutocompleteResponse),
         (status = 400, description = "Invalid coordinates or empty query"),
@@ -209,16 +209,10 @@ fn validate_coordinates(lat: f64, lng: f64) -> Result<(), AppError> {
 #[utoipa::path(
     get,
     path = "/api/v1/location/nearby-shifts",
-    tag = "Location",
+    tag = "location",
     summary = "Search nearby facilities with active shifts",
     description = "Find nearby healthcare facilities that have active shift openings",
-    params(
-        ("lat" = f64, Query, description = "Latitude coordinate", example = 10.46567),
-        ("lng" = f64, Query, description = "Longitude coordinate", example = 7.43196),
-        ("q" = Option<String>, Query, description = "Search query (optional)"),
-        ("radius" = Option<i32>, Query, description = "Search radius in meters", example = 5000),
-        ("limit" = Option<i32>, Query, description = "Maximum results", example = 5)
-    ),
+    params(FacilitySearchParams),
     responses(
         (status = 200, description = "Facilities with active shifts", body = NearbyShiftsResponse),
         (status = 400, description = "Invalid coordinates"),
@@ -296,18 +290,15 @@ pub async fn search_nearby_shifts(
 #[utoipa::path(
     get,
     path = "/api/v1/location/nexuscare-facilities/search",
-    params(
-        ("lat" = f64, Query, description = "Latitude of search center"),
-        ("lng" = f64, Query, description = "Longitude of search center"),
-        ("radius" = Option<i32>, Query, description = "Search radius in meters (default: 5000)"),
-        ("limit" = Option<i32>, Query, description = "Maximum results (default: 20)")
-    ),
+    tag = "location",
+    summary = "Search nearby Nexuscare facilities",
+    description = "Find healthcare facilities registered with Nexuscare platform near a given location",
+    params(FacilitySearchParams),
     responses(
         (status = 200, description = "Nexuscare facilities found", body = FacilitySearchResponse),
         (status = 400, description = "Invalid coordinates or parameters"),
         (status = 500, description = "Service error")
-    ),
-    tag = "Location"
+    )
 )]
 pub async fn search_nexuscare_facilities(
     State(state): State<AppState>,

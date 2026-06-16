@@ -96,7 +96,7 @@ impl RegistrationService {
     /// Register a new hospital with complete workflow
     pub async fn register_hospital(
         &self,
-        user_id: Uuid,
+        _user_id: Uuid,
         request: HospitalRegistrationRequest,
     ) -> Result<HospitalRegistrationResult, RegistrationError> {
         // Normalise the email so capitalisation differences can't smuggle
