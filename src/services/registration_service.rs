@@ -13,7 +13,7 @@ use crate::services::audit_service::{AuditService, AuditServiceError, Registrati
 use crate::services::email_outbox_service::EmailOutboxService;
 use crate::services::email_templates;
 use crate::services::identity_verification_service::{
-    IdentityKind, IdentityOwner, IdentityVerificationService,
+    IdentityOwner, IdentityVerificationService,
 };
 use crate::services::location_service::{LocationService, LocationServiceError};
 use crate::services::wallet_service::WalletService;
@@ -369,25 +369,12 @@ impl RegistrationService {
             eprintln!("Warning: Failed to queue approval email: {}", e);
         }
 
-        // provision the hospital's SafeHaven sub-account, passing the verified BVN
-        let verified_bvn = self
-            .identity_service
-            .decrypted_number(IdentityOwner::Hospital, hospital_id, IdentityKind::Bvn)
-            .await
-            .unwrap_or(None);
-        if let Err(e) = self
-            .wallet_service
-            .ensure_sub_account(
-                hospital_id,
-                &hospital.phone_number,
-                &hospital.email,
-                "BVN",
-                verified_bvn.as_deref(),
-            )
-            .await
-        {
+        // Ensure a wallet row exists. SafeHaven sub-account provisioning is a
+        // separate, admin-driven step (it needs a fresh OTP) — see the
+        // /wallet/sub-account/{initiate,provision} endpoints.
+        if let Err(e) = self.wallet_service.ensure_wallet(hospital_id).await {
             eprintln!(
-                "Warning: Failed to provision SafeHaven sub-account for hospital {}: {}",
+                "Warning: Failed to ensure wallet row for hospital {}: {}",
                 hospital_id, e
             );
         }

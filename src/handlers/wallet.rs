@@ -356,6 +356,103 @@ pub async fn retry_payout(
     }))
 }
 
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+pub struct ProvisionSubAccountRequest {
+    /// OTP sent to the hospital admin's phone during sub-account initiate.
+    pub otp: String,
+}
+
+#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+pub struct SubAccountStatusResponse {
+    pub message: String,
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/wallet/sub-account/initiate",
+    responses(
+        (status = 200, description = "Sub-account verification initiated; OTP sent", body = SubAccountStatusResponse),
+        (status = 401, body = ErrorResponse),
+        (status = 403, description = "BVN not verified / no hospital", body = ErrorResponse),
+        (status = 409, description = "Already provisioned", body = ErrorResponse)
+    ),
+    tag = "wallet",
+    summary = "Initiate SafeHaven sub-account provisioning (sends OTP)"
+)]
+pub async fn initiate_sub_account(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> AppResult<Json<SubAccountStatusResponse>> {
+    let hospital_id = hospital_id_from_claims(&headers)?;
+
+    // Need the admin's verified BVN to drive SafeHaven's sub-account verification.
+    let bvn = state
+        .identity_service
+        .decrypted_number(
+            crate::services::identity_verification_service::IdentityOwner::Hospital,
+            hospital_id,
+            crate::services::identity_verification_service::IdentityKind::Bvn,
+        )
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("{e}")))?
+        .ok_or_else(|| {
+            AppError::Forbidden("Hospital admin BVN must be verified first".to_string())
+        })?;
+
+    state
+        .wallet_service
+        .initiate_sub_account(hospital_id, &bvn)
+        .await
+        .map_err(map_wallet_error)?;
+
+    Ok(Json(SubAccountStatusResponse {
+        message: "Sub-account verification initiated. An OTP has been sent to the registered phone."
+            .to_string(),
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/wallet/sub-account/provision",
+    request_body = ProvisionSubAccountRequest,
+    responses(
+        (status = 200, description = "Sub-account provisioned", body = SubAccountStatusResponse),
+        (status = 401, body = ErrorResponse),
+        (status = 403, body = ErrorResponse),
+        (status = 409, description = "Provider rejected / not initiated", body = ErrorResponse)
+    ),
+    tag = "wallet",
+    summary = "Complete SafeHaven sub-account provisioning with the OTP"
+)]
+pub async fn provision_sub_account(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<ProvisionSubAccountRequest>,
+) -> AppResult<Json<SubAccountStatusResponse>> {
+    let hospital_id = hospital_id_from_claims(&headers)?;
+
+    // Look up the hospital's contact details for the SafeHaven payload.
+    let contact: Option<(String, String)> = sqlx::query_as(
+        "SELECT phone_number, email FROM hospitals WHERE id = $1",
+    )
+    .bind(hospital_id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(AppError::Database)?;
+    let (phone, email) =
+        contact.ok_or_else(|| AppError::NotFound("Hospital not found".to_string()))?;
+
+    state
+        .wallet_service
+        .provision_sub_account(hospital_id, &phone, &email, &req.otp)
+        .await
+        .map_err(map_wallet_error)?;
+
+    Ok(Json(SubAccountStatusResponse {
+        message: "SafeHaven sub-account provisioned successfully.".to_string(),
+    }))
+}
+
 #[derive(Debug, serde::Serialize, utoipa::ToSchema)]
 pub struct ErrorResponse {
     pub error: String,

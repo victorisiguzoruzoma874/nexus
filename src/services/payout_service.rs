@@ -250,7 +250,7 @@ impl PayoutService {
                        SET status                  = 'success',
                            provider_reference      = $2,
                            provider_transaction_id = $3,
-                           completed_at            = NOW, updated_at              = NOW()
+                           completed_at            = NOW(), updated_at              = NOW()
                      WHERE id = $1
                     "#,
                 )
@@ -310,16 +310,19 @@ impl PayoutService {
         .execute(&mut *tx)
         .await?;
 
+        // The original payout debited `held_kobo` (consuming the shift escrow).
+        // On failure, return the gross to AVAILABLE balance so it is spendable
+        // again — not back into held, which would strand it in escrow.
         self.wallet_repo
             .insert_ledger_entry_in_tx(
                 &mut tx,
                 p.hospital_id,
                 "payout_reversal",
-                0,
                 gross,
+                0,
                 Some(p.shift_id),
                 Some(&payout_id.to_string()),
-                Some("escrow re-credited after failed transfer"),
+                Some("escrow re-credited to balance after failed transfer"),
             )
             .await
             .map_err(|e| match e {
@@ -334,8 +337,8 @@ impl PayoutService {
         sqlx::query(
             r#"
             UPDATE hospital_wallets
-               SET held_kobo  = held_kobo + $2,
-                   updated_at = NOW()
+               SET balance_kobo = balance_kobo + $2,
+                   updated_at   = NOW()
              WHERE hospital_id = $1
             "#,
         )

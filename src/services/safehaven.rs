@@ -248,33 +248,23 @@ impl SafeHavenClient {
         // Detect business errors embedded in a 2xx response.
         if let Some(code) = value.get("statusCode").and_then(|v| v.as_i64()) {
             if code >= 400 {
-                let msg = value
-                    .get("message")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("rejected by SafeHaven")
-                    .to_string();
-                return Err(SafeHavenError::Rejected(msg));
+                return Err(SafeHavenError::Rejected(extract_error_detail(&value)));
             }
         }
         if let Some(rc) = value.get("responseCode").and_then(|v| v.as_str()) {
             if rc != "00" {
-                let msg = value
-                    .get("message")
-                    .or_else(|| value.get("responseMessage"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("rejected by SafeHaven")
-                    .to_string();
-                return Err(SafeHavenError::Rejected(format!("{msg} (rc={rc})")));
+                return Err(SafeHavenError::Rejected(format!(
+                    "{} (rc={rc})",
+                    extract_error_detail(&value)
+                )));
             }
         }
 
         if !status.is_success() {
-            let msg = value
-                .get("message")
-                .and_then(|v| v.as_str())
-                .unwrap_or("upstream error")
-                .to_string();
-            return Err(SafeHavenError::Rejected(format!("HTTP {status}: {msg}")));
+            return Err(SafeHavenError::Rejected(format!(
+                "HTTP {status}: {}",
+                extract_error_detail(&value)
+            )));
         }
 
         Ok(value)
@@ -344,6 +334,7 @@ impl SafeHavenClient {
 
     /// `POST /accounts/v2/subaccount` — per-hospital sub-account. Pass the
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_sub_account(
         &self,
         phone_number: &str,
@@ -351,6 +342,8 @@ impl SafeHavenClient {
         external_reference: &str,
         identity_type: &str,
         identity_number: Option<&str>,
+        identity_id: Option<&str>,
+        otp: Option<&str>,
         callback_url: Option<&str>,
     ) -> Result<SubAccount, SafeHavenError> {
         if self.is_mock() {
@@ -368,12 +361,16 @@ impl SafeHavenClient {
             });
         }
 
+        // SafeHaven's /accounts/v2/subaccount requires `identityId` (the _id from
+        // a BVN/NIN verification) plus the `otp` sent during that verification.
         let body = json!({
             "phoneNumber": phone_number,
             "emailAddress": email,
             "externalReference": external_reference,
             "identityType": identity_type,
             "identityNumber": identity_number,
+            "identityId": identity_id,
+            "otp": otp,
             "callbackUrl": callback_url,
             "autoSweep": false,
         });
@@ -430,12 +427,15 @@ impl SafeHavenClient {
             });
         }
 
+        // Per SafeHaven's Create Virtual Account spec, settlementAccount carries
+        // ONLY bankCode (settlement routes to the merchant account behind that
+        // code); including accountNumber makes SafeHaven reject the request.
+        let _ = settlement_account_number;
         let body = json!({
             "validFor": valid_for_secs,
             "callbackUrl": callback_url,
             "settlementAccount": {
                 "bankCode": settlement_bank_code.unwrap_or(&self.bank_code),
-                "accountNumber": settlement_account_number.unwrap_or(&self.debit_account_number),
             },
             "amountControl": "OverPayment",
             "amount": amount_naira,
@@ -648,6 +648,33 @@ impl SafeHavenClient {
     }
 }
 
+/// Pull the most descriptive error text out of a SafeHaven error body. Falls
+/// back through `message` (string or nested), `errors`, then the whole JSON so
+/// validation reasons are never swallowed into a generic string.
+fn extract_error_detail(value: &Value) -> String {
+    if let Some(s) = value.get("message").and_then(|v| v.as_str()) {
+        if !s.trim().is_empty() {
+            return s.to_string();
+        }
+    }
+    // Some responses nest: { message: { message: "...", ... } }
+    if let Some(s) = value
+        .get("message")
+        .and_then(|m| m.get("message"))
+        .and_then(|v| v.as_str())
+    {
+        return s.to_string();
+    }
+    if let Some(errs) = value.get("errors") {
+        return errs.to_string();
+    }
+    if value.is_null() {
+        return "rejected by SafeHaven (empty body)".to_string();
+    }
+    // Last resort: surface the whole body so the real reason is visible.
+    value.to_string()
+}
+
 fn rand_digits9() -> u64 {
     let mut bytes = [0u8; 16];
     bytes.copy_from_slice(Uuid::new_v4().as_bytes());
@@ -769,6 +796,8 @@ mod tests {
                 "hospital-uuid-here",
                 "BVN",
                 Some("22222222222"),
+                Some("mock-identity-id"),
+                Some("123456"),
                 None,
             )
             .await

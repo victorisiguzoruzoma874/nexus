@@ -48,23 +48,71 @@ impl WalletService {
         }
     }
 
-    /// Idempotently provision a SafeHaven sub-account for the hospital
+    /// Ensure a wallet row exists for the hospital (no SafeHaven call).
+    pub async fn ensure_wallet(&self, hospital_id: Uuid) -> Result<(), WalletServiceError> {
+        self.repo.ensure_wallet_row(hospital_id).await?;
+        Ok(())
+    }
 
-    pub async fn ensure_sub_account(
+    /// Whether the hospital already has a provisioned SafeHaven sub-account.
+    pub async fn has_sub_account(&self, hospital_id: Uuid) -> Result<bool, WalletServiceError> {
+        Ok(self
+            .repo
+            .find_wallet(hospital_id)
+            .await?
+            .map(|w| w.safehaven_account_id.is_some())
+            .unwrap_or(false))
+    }
+
+    /// Step 1 of sub-account provisioning: ask SafeHaven to initiate a fresh BVN
+    /// verification (sends an OTP to the registered phone) and stash the returned
+    /// identityId + BVN so the provision step can complete it. `bvn` is the
+    /// hospital admin's verified BVN (caller supplies the decrypted value).
+    pub async fn initiate_sub_account(
+        &self,
+        hospital_id: Uuid,
+        bvn: &str,
+    ) -> Result<(), WalletServiceError> {
+        self.repo.ensure_wallet_row(hospital_id).await?;
+        if self.has_sub_account(hospital_id).await? {
+            return Err(WalletServiceError::Validation(
+                "Sub-account already provisioned".to_string(),
+            ));
+        }
+
+        let identity_id = self
+            .safehaven
+            .initiate_identity_verification("BVN", bvn)
+            .await?;
+
+        self.repo
+            .save_provisioning_state(hospital_id, &identity_id, bvn)
+            .await?;
+        Ok(())
+    }
+
+    /// Step 2: complete provisioning with the OTP the admin received. Calls
+    /// SafeHaven /accounts/v2/subaccount with the stashed identityId + BVN + otp.
+    pub async fn provision_sub_account(
         &self,
         hospital_id: Uuid,
         phone_number: &str,
         email: &str,
-        identity_type: &str,
-        identity_number: Option<&str>,
+        otp: &str,
     ) -> Result<(), WalletServiceError> {
-        self.repo.ensure_wallet_row(hospital_id).await?;
-
-        if let Some(w) = self.repo.find_wallet(hospital_id).await? {
-            if w.safehaven_account_id.is_some() {
-                return Ok(());
-            }
+        if self.has_sub_account(hospital_id).await? {
+            return Ok(());
         }
+
+        let (identity_id, bvn) = self
+            .repo
+            .get_provisioning_state(hospital_id)
+            .await?
+            .ok_or_else(|| {
+                WalletServiceError::Validation(
+                    "No sub-account provisioning in progress; call initiate first".to_string(),
+                )
+            })?;
 
         let callback = (!self.callback_url.trim().is_empty()).then_some(self.callback_url.as_str());
 
@@ -74,8 +122,10 @@ impl WalletService {
                 phone_number,
                 email,
                 &hospital_id.to_string(),
-                identity_type,
-                identity_number,
+                "BVN",
+                Some(&bvn),
+                Some(&identity_id),
+                Some(otp),
                 callback,
             )
             .await?;
@@ -142,16 +192,18 @@ impl WalletService {
         let amount_naira = amount_kobo / 100;
         let external_reference = format!("dep_{}", Uuid::new_v4());
 
+        // Settle into the hospital's sub-account only when we have BOTH a
+        // non-blank bank code and account number; otherwise pass no settlement
+        // override (SafeHaven rejects an empty settlement bank code).
         let wallet = self.repo.find_wallet(hospital_id).await?;
         let (settlement_bank, settlement_acct) = wallet
             .as_ref()
-            .and_then(
-                |w| match (&w.safehaven_bank_code, &w.safehaven_account_number) {
-                    (Some(b), Some(a)) => Some((b.clone(), a.clone())),
-                    _ => None,
-                },
-            )
-            .map(|(b, a)| (Some(b), Some(a)))
+            .and_then(|w| match (&w.safehaven_bank_code, &w.safehaven_account_number) {
+                (Some(b), Some(a)) if !b.trim().is_empty() && !a.trim().is_empty() => {
+                    Some((Some(b.clone()), Some(a.clone())))
+                }
+                _ => None,
+            })
             .unwrap_or((None, None));
 
         let callback = if self.callback_url.trim().is_empty() {
