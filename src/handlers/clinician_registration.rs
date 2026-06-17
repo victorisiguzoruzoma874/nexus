@@ -61,7 +61,7 @@ pub async fn verify_otp(
 
     state
         .clinician_registration_service
-        .verify_otp(&req.email, &req.otp)
+        .verify_otp(&req.email, &req.code)
         .await
         .map(|r| (StatusCode::CREATED, Json(r)))
         .map_err(map_err)

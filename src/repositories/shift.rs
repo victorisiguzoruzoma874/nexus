@@ -490,7 +490,7 @@ impl ShiftRepository {
             )
             VALUES (
                 $1, $2, $3, $4, $5, $6,
-                NOW, NOW() + INTERVAL '1 hour', NOW() + INTERVAL '48 hours'
+                NOW(), NOW() + INTERVAL '1 hour', NOW() + INTERVAL '48 hours'
             )
             ON CONFLICT (shift_id) DO UPDATE
               SET patients_seen     = EXCLUDED.patients_seen,

@@ -250,7 +250,7 @@ impl PayoutService {
                        SET status                  = 'success',
                            provider_reference      = $2,
                            provider_transaction_id = $3,
-                           completed_at            = NOW, updated_at              = NOW()
+                           completed_at            = NOW(), updated_at              = NOW()
                      WHERE id = $1
                     "#,
                 )
