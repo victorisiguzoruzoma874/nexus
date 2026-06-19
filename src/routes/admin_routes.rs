@@ -10,7 +10,7 @@ use axum::{
     Router,
 };
 
-use crate::handlers::{admin, registration};
+use crate::handlers::{admin, registration, wallet};
 use crate::middlewares::require_role;
 use crate::models::user::UserRole;
 use crate::routes::AppState;
@@ -28,6 +28,10 @@ pub fn admin_routes() -> Router<AppState> {
         .route(
             "/api/v1/admin/hospitals/{hospital_id}/reject",
             post(registration::reject_hospital),
+        )
+        .route(
+            "/api/v1/admin/payouts/{shift_id}/retry",
+            post(wallet::retry_payout),
         )
         // ONE guard for the whole admin surface.
         .route_layer(from_fn(require_role(&[UserRole::SuperAdmin])))

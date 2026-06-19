@@ -635,11 +635,6 @@ pub fn create_router(
             get(wallet::get_statement)
                 .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
         )
-        .route(
-            "/api/v1/admin/payouts/{shift_id}/retry",
-            post(wallet::retry_payout)
-                .route_layer(from_fn(require_role(&[UserRole::SuperAdmin]))),
-        )
         // ---- Webhooks — authenticated by HMAC signature, not JWT.
         .route(
             "/api/v1/webhooks/safehaven",
