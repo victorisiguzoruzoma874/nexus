@@ -12,31 +12,38 @@ use tower_http::{
     cors::{Any, CorsLayer},
     trace::TraceLayer,
 };
-use utoipa::OpenApi;
+use utoipa::{
+    openapi::security::{HttpAuthScheme, HttpBuilder, SecurityRequirement, SecurityScheme},
+    Modify, OpenApi,
+};
 use utoipa_swagger_ui::SwaggerUi;
 
-use crate::handlers::{admin, auth, health, hospitals, registration, clinician_registration, shifts};
+use crate::handlers::{admin, auth, earnings, health, hospitals, identity, registration, clinician_registration, shifts, wallet, webhooks};
 use crate::repositories::{
     audit::AuditRepository,
     billing::BillingRepository,
     clinician::ClinicianRepository,
     hospital::HospitalRepository,
+    identity_verification::IdentityVerificationRepository,
     location::LocationRepository,
     shift::ShiftRepository,
+    wallet::WalletRepository,
 };
 use crate::services::{
     audit_service::AuditService,
     auth_service::AuthService,
     encryption::EncryptionService,
     geocoding::GeocodingClient,
+    identity_verification_service::IdentityVerificationService,
     location_service::LocationService,
     notification_service::NotificationService,
     email_outbox_service::EmailOutboxService,
-    payment_service::PaymentService,
-    paystack::PaystackClient,
+    safehaven::SafeHavenClient,
     registration_service::RegistrationService,
     clinician_registration_service::ClinicianRegistrationService,
     shift_service::ShiftService,
+    wallet_service::WalletService,
+    payout_service::PayoutService,
 };
 
 /// Shared application state
@@ -47,7 +54,11 @@ pub struct AppState {
     pub clinician_registration_service: Arc<ClinicianRegistrationService>,
     pub auth_service: Arc<AuthService>,
     pub shift_service: Arc<ShiftService>,
+    pub wallet_service: Arc<WalletService>,
+    pub payout_service: Arc<PayoutService>,
     pub clinician_repo: Arc<ClinicianRepository>,
+    pub identity_service: Arc<IdentityVerificationService>,
+    pub safehaven: Arc<SafeHavenClient>,
 }
 
 /// API Documentation
@@ -58,12 +69,8 @@ pub struct AppState {
         crate::handlers::health::health_check,
         crate::handlers::health::db_health_check,
         // Auth
-        crate::handlers::auth::register,
-        crate::handlers::auth::login,
         crate::handlers::auth::email_otp_send,
         crate::handlers::auth::email_otp_verify,
-        crate::handlers::auth::forgot_password,
-        crate::handlers::auth::reset_password,
         crate::handlers::auth::refresh_token,
         crate::handlers::auth::logout,
         // Hospital Registration (Admin)
@@ -77,6 +84,13 @@ pub struct AppState {
         crate::handlers::clinician_registration::verify_otp,
         crate::handlers::clinician_registration::complete_profile,
         crate::handlers::clinician_registration::add_bank_account,
+        // Identity verification (BVN/NIN) + bank list
+        crate::handlers::identity::hospital_initiate,
+        crate::handlers::identity::hospital_validate,
+        crate::handlers::identity::clinician_initiate,
+        crate::handlers::identity::clinician_validate,
+        crate::handlers::identity::list_banks,
+        crate::handlers::identity::resolve_account,
         // Shifts
         crate::handlers::shifts::create_shift,
         crate::handlers::shifts::list_shifts,
@@ -93,6 +107,7 @@ pub struct AppState {
         crate::handlers::shifts::submit_handover,
         crate::handlers::shifts::clock_out,
         crate::handlers::shifts::request_handover_revision,
+        crate::handlers::shifts::approve_handover,
         crate::handlers::shifts::rate_worker,
         crate::handlers::shifts::rate_hospital,
         crate::handlers::shifts::edit_rating,
@@ -111,6 +126,19 @@ pub struct AppState {
         // Admin
         crate::handlers::admin::list_hospitals_admin,
         crate::handlers::admin::list_clinicians_admin,
+        // Wallet
+        crate::handlers::wallet::get_wallet,
+        crate::handlers::wallet::get_ledger,
+        crate::handlers::wallet::create_deposit,
+        crate::handlers::wallet::list_deposits,
+        crate::handlers::wallet::list_payouts,
+        crate::handlers::wallet::get_payout_status,
+        crate::handlers::wallet::get_statement,
+        crate::handlers::wallet::retry_payout,
+        // Webhooks
+        crate::handlers::webhooks::safehaven_webhook,
+        // Earnings
+        crate::handlers::earnings::get_earnings,
     ),
     components(
         schemas(
@@ -150,6 +178,19 @@ pub struct AppState {
             crate::models::shift::ClockinApprovalRequest,
             crate::models::shift::ClockinApprovalDecisionRequest,
             crate::models::shift::ClockinApprovalRecord,
+            // Wallet
+            crate::models::wallet::WalletSummary,
+            crate::models::wallet::WalletLedgerEntry,
+            crate::models::wallet::WalletDepositRequest,
+            crate::models::wallet::CreateDepositRequest,
+            crate::models::wallet::DepositResponse,
+            crate::handlers::wallet::LedgerPage,
+            crate::handlers::wallet::PayoutPage,
+            crate::handlers::wallet::PayoutStatusResponse,
+            crate::handlers::wallet::PayoutRetryResponse,
+            crate::services::payout_service::PayoutRow,
+            crate::handlers::earnings::EarningsSummary,
+            crate::handlers::earnings::EarningsTransaction,
             // Admin
             crate::handlers::admin::ClinicianListResponse,
             crate::handlers::admin::PaginationMetadata,
@@ -176,13 +217,9 @@ pub struct AppState {
             crate::models::shift::ShiftCancelRequest,
             crate::models::shift::ShiftRescheduleRequest,
             crate::models::user::UserResponse,
-            crate::models::user::CreateUserRequest,
-            crate::models::user::LoginRequest,
             crate::models::user::LoginResponse,
             crate::models::user::EmailLoginRequest,
             crate::models::user::EmailOtpVerifyRequest,
-            crate::models::user::ForgotPasswordRequest,
-            crate::models::user::ResetPasswordRequest,
             crate::models::user::RefreshTokenRequest,
             crate::models::user::LogoutRequest,
             crate::models::clinician_registration::SendOtpRequest,
@@ -194,6 +231,12 @@ pub struct AppState {
             crate::models::clinician_registration::AddBankAccountRequest,
             crate::models::clinician_registration::BankAccountResponse,
             crate::models::clinician::ClinicianAdminSummary,
+            // Identity verification
+            crate::handlers::identity::InitiateIdentityRequest,
+            crate::handlers::identity::ValidateIdentityRequest,
+            crate::handlers::identity::IdentityStatusResponse,
+            crate::handlers::identity::ResolveAccountRequest,
+            crate::handlers::identity::ResolveAccountResponse,
             // Services
             crate::services::registration_service::RegistrationStatusResponse,
             crate::services::registration_service::HospitalListResponse,
@@ -220,10 +263,39 @@ pub struct AppState {
         (name = "hospitals", description = "Hospital management endpoints"),
         (name = "clinicians", description = "Clinician registration and management endpoints"),
         (name = "shifts", description = "Shift creation and management endpoints"),
-        (name = "admin", description = "Admin-only endpoints")
-    )
+        (name = "admin", description = "Admin-only endpoints"),
+        (name = "wallet", description = "Hospital wallet — balance, deposits, ledger (Tier 2)"),
+        (name = "webhooks", description = "Inbound webhooks from external providers (SafeHaven)"),
+        (name = "earnings", description = "Worker earnings — totals + transaction history"),
+        (name = "identity", description = "BVN/NIN identity verification and bank list")
+    ),
+    modifiers(&SecurityAddon)
 )]
 struct ApiDoc;
+
+/// Swagger UI security wiring — adds the `bearerAuth` scheme so the
+struct SecurityAddon;
+
+impl Modify for SecurityAddon {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        // 1. Declare the scheme so the "Authorize" button appears.
+        let components = openapi
+            .components
+            .get_or_insert_with(utoipa::openapi::Components::new);
+        components.add_security_scheme(
+            "bearerAuth",
+            SecurityScheme::Http(
+                HttpBuilder::new()
+                    .scheme(HttpAuthScheme::Bearer)
+                    .bearer_format("JWT")
+                    .description(Some("Paste a JWT from POST /api/v1/auth/otp/verify."))
+                    .build(), ),
+        );
+
+        // 2. Apply the scheme to every operation by default. Endpoints that
+        openapi.security = Some(vec![SecurityRequirement::new("bearerAuth", [""; 0])]);
+    }
+}
 
 pub fn create_router(
     pool: PgPool,
@@ -238,21 +310,17 @@ pub fn create_router(
     // Initialize repositories
     let hospital_repo = Arc::new(HospitalRepository::new(pool.clone()));
     let location_repo = Arc::new(LocationRepository::new(pool.clone()));
-    let billing_repo = Arc::new(BillingRepository::new(pool.clone()));
+    // Held for wallet ledger; constructed here so the connection pool
+    let _billing_repo = Arc::new(BillingRepository::new(pool.clone()));
     let audit_repo = Arc::new(AuditRepository::new(pool.clone()));
     let clinician_repo = Arc::new(ClinicianRepository::new(pool.clone()));
     let shift_repo = Arc::new(ShiftRepository::new(pool.clone()));
 
     // Initialize external services
     let geocoding_client = Arc::new(GeocodingClient::new(
-        std::env::var("GEOCODING_API_URL").ok(),
-    ));
+        std::env::var("GEOCODING_API_URL").ok(), ));
 
-    let paystack_client = Arc::new(PaystackClient::new(
-        std::env::var("PAYSTACK_SECRET_KEY")
-            .unwrap_or_else(|_| "sk_test_dummy".to_string()),
-        std::env::var("PAYSTACK_API_URL").ok(),
-    ));
+    let safehaven_client = Arc::new(SafeHavenClient::from_env());
 
     let encryption_service = Arc::new({
         let key_hex = std::env::var("ENCRYPTION_KEY")
@@ -266,35 +334,33 @@ pub fn create_router(
     // Initialize business services
     let location_service = Arc::new(LocationService::new(
         geocoding_client,
-        location_repo.clone(),
-    ));
-
-    let payment_service = Arc::new(PaymentService::new(
-        paystack_client.clone(),
-        billing_repo.clone(),
-        encryption_service.clone(),
-    ));
+        location_repo.clone(), ));
 
     let audit_service = Arc::new(AuditService::new(audit_repo));
+
+    // Identity verification (BVN/NIN) — shared by both registration flows
+    let identity_repo = Arc::new(IdentityVerificationRepository::new(pool.clone()));
+    let identity_service = Arc::new(IdentityVerificationService::new(
+        safehaven_client.clone(),
+        encryption_service.clone(),
+        identity_repo,
+    ));
+
+    // Initialize wallet service. Threaded into registration_service
+    let wallet_repo = Arc::new(WalletRepository::new(pool.clone()));
+    let wallet_service = Arc::new(WalletService::new(
+        wallet_repo.clone(), safehaven_client.clone(), pool.clone(), ));
 
     // Initialize registration service
     let registration_service = Arc::new(RegistrationService::new(
         hospital_repo,
         location_service,
-        payment_service,
         audit_service,
-        email_outbox_service.clone(),
-        pool.clone(),
-    ));
+        email_outbox_service.clone(), wallet_service.clone(), pool.clone(), identity_service.clone(), ));
 
     // Initialize clinician registration service
     let clinician_registration_service = Arc::new(ClinicianRegistrationService::new(
-        clinician_repo.clone(),
-        email_outbox_service.clone(),
-        paystack_client.clone(),
-        encryption_service.clone(),
-        pool.clone(),
-    ));
+        clinician_repo.clone(), email_outbox_service.clone(), safehaven_client.clone(), encryption_service.clone(), pool.clone(), identity_service.clone(), ));
 
     // Initialize auth service
     let auth_service = Arc::new(AuthService::new(pool.clone(), email_outbox_service.clone()));
@@ -302,33 +368,32 @@ pub fn create_router(
     // Initialize shift service
     let shift_service = Arc::new(ShiftService::new(
         shift_repo,
-        pool.clone(),
-        notification_service.clone(),
-        email_outbox_service.clone(),
-    ));
+        pool.clone(), notification_service.clone(), email_outbox_service.clone(), wallet_service.clone(), ));
+
+    // Initialize payout service. Borrows the wallet repo so it can
+    let payout_service = Arc::new(PayoutService::new(
+        pool.clone(), wallet_repo.clone(), clinician_repo.clone(), safehaven_client.clone(), encryption_service.clone(), ));
 
     // Create shared state
     let state = AppState {
-        pool: pool.clone(),
-        registration_service,
+        pool: pool.clone(), registration_service,
         clinician_registration_service,
         auth_service,
         shift_service,
+        wallet_service,
+        payout_service,
         clinician_repo: clinician_repo.clone(),
-    };
+        identity_service,
+        safehaven: safehaven_client.clone(), };
 
     // Create API routes
     let api_router = Router::new()
         // Health
         .route("/health", get(health::health_check))
         .route("/health/db", get(health::db_health_check))
-        // Auth
-        .route("/api/v1/auth/register", post(auth::register))
-        .route("/api/v1/auth/login", post(auth::login))
+        // Auth (OTP-only).
         .route("/api/v1/auth/otp/send", post(auth::email_otp_send))
         .route("/api/v1/auth/otp/verify", post(auth::email_otp_verify))
-        .route("/api/v1/auth/forgot-password", post(auth::forgot_password))
-        .route("/api/v1/auth/reset-password", post(auth::reset_password))
         .route("/api/v1/auth/refresh", post(auth::refresh_token))
         .route("/api/v1/auth/logout", post(auth::logout))
         // Hospital Registration
@@ -386,12 +451,26 @@ pub fn create_router(
             "/api/v1/clinicians/{clinician_id}/bank-account",
             post(clinician_registration::add_bank_account),
         )
-        // Shifts — gated per FRS v2.0 §2.2 permission matrix.
-        //
-        // HospitalAdmin/SuperAdmin: create, list-all, preview, view applications,
-        //                           assign, cancel, reschedule.
-        // HealthWorker: express interest, apply.
-        // Anyone authenticated: view a single shift's details (worker discovery).
+        // Identity verification (BVN/NIN) + bank list
+        .route(
+            "/api/v1/hospitals/{hospital_id}/identity/initiate",
+            post(identity::hospital_initiate),
+        )
+        .route(
+            "/api/v1/hospitals/{hospital_id}/identity/validate",
+            post(identity::hospital_validate),
+        )
+        .route(
+            "/api/v1/clinicians/{clinician_id}/identity/initiate",
+            post(identity::clinician_initiate),
+        )
+        .route(
+            "/api/v1/clinicians/{clinician_id}/identity/validate",
+            post(identity::clinician_validate),
+        )
+        .route("/api/v1/banks", get(identity::list_banks))
+        .route("/api/v1/banks/resolve", post(identity::resolve_account))
+        // Shifts — gated per FRS v2.0 permission matrix.
         .route(
             "/api/v1/shifts",
             post(shifts::create_shift)
@@ -464,6 +543,11 @@ pub fn create_router(
                 .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
         )
         .route(
+            "/api/v1/shifts/{shift_id}/handover/approve",
+            post(shifts::approve_handover)
+                .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
+        )
+        .route(
             "/api/v1/shifts/{shift_id}/ratings/worker",
             post(shifts::rate_worker)
                 .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
@@ -532,6 +616,54 @@ pub fn create_router(
             "/api/v1/shifts/{shift_id}/reschedule",
             post(shifts::reschedule_shift)
                 .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
+        )
+        // ---- Wallet — HospitalAdmin/SuperAdmin only.
+        .route(
+            "/api/v1/wallet",
+            get(wallet::get_wallet)
+                .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
+        )
+        .route(
+            "/api/v1/wallet/ledger",
+            get(wallet::get_ledger)
+                .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
+        )
+        .route(
+            "/api/v1/wallet/deposits",
+            post(wallet::create_deposit)
+                .get(wallet::list_deposits)
+                .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
+        )
+        .route(
+            "/api/v1/wallet/payouts",
+            get(wallet::list_payouts)
+                .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
+        )
+        .route(
+            "/api/v1/wallet/payouts/{payout_id}/status",
+            get(wallet::get_payout_status)
+                .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
+        )
+        .route(
+            "/api/v1/wallet/statement",
+            get(wallet::get_statement)
+                .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
+        )
+        .route(
+            "/api/v1/admin/payouts/{shift_id}/retry",
+            post(wallet::retry_payout)
+                .route_layer(from_fn(require_role(&[UserRole::SuperAdmin]))),
+        )
+        // ---- Webhooks — authenticated by HMAC signature, not JWT.
+        .route(
+            "/api/v1/webhooks/safehaven",
+            post(webhooks::safehaven_webhook),
+        )
+        // ---- Worker earnings — HealthWorker only.
+        .route(
+            "/api/v1/worker/earnings",
+            get(earnings::get_earnings)
+                .route_layer(from_fn(require_role(&[UserRole::HealthWorker]))),
         )
         .layer(TraceLayer::new_for_http())
         .layer(cors)

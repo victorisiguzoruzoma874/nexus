@@ -18,7 +18,6 @@ pub enum RepositoryError {
 }
 
 /// Repository for hospital data persistence operations
-/// Implements CRUD operations with transaction support
 pub struct HospitalRepository {
     pool: PgPool,
 }
@@ -29,7 +28,6 @@ impl HospitalRepository {
     }
 
     /// Create a new hospital record within a transaction
-    /// Requirements: 1.3, 1.4, 4.1, 10.1
     pub async fn create(
         &self,
         tx: &mut Transaction<'_, Postgres>,
@@ -75,7 +73,6 @@ impl HospitalRepository {
     }
 
     /// Find hospital by ID
-    /// Requirements: 1.4, 4.2
     pub async fn find_by_id(&self, hospital_id: Uuid) -> Result<Option<Hospital>, RepositoryError> {
         let hospital = sqlx::query_as::<_, Hospital>(
             r#"
@@ -96,7 +93,6 @@ impl HospitalRepository {
     }
 
     /// Find hospital by email
-    /// Requirements: 10.1 (duplicate detection)
     pub async fn find_by_email(&self, email: &str) -> Result<Option<Hospital>, RepositoryError> {
         let hospital = sqlx::query_as::<_, Hospital>(
             r#"
@@ -117,7 +113,6 @@ impl HospitalRepository {
     }
 
     /// Update hospital registration status
-    /// Requirements: 4.3, 4.4, 10.2
     pub async fn update_status(
         &self,
         tx: &mut Transaction<'_, Postgres>,
@@ -153,7 +148,6 @@ impl HospitalRepository {
     }
 
     /// List all pending hospital registrations
-    /// Requirements: 4.2
     pub async fn list_pending(
         &self,
         limit: i64,
@@ -181,7 +175,6 @@ impl HospitalRepository {
     }
 
     /// List all hospitals with optional status filter
-    /// Requirements: 4.2
     pub async fn list_all(
         &self,
         status_filter: Option<RegistrationStatus>,
@@ -265,28 +258,21 @@ mod tests {
     use super::*;
 
     // Unit tests will be added here
-    // Property tests will be in Task 2.5
 }
 
 
 // Note: Full integration tests with database will be in Task 10.5
-// These are unit-level property tests for validation logic
 #[cfg(test)]
 mod property_tests {
     use super::*;
     use proptest::prelude::*;
 
     // Property 3: Unique hospital identifiers
-    // This property is enforced by the database (UUID primary key)
-    // and unique constraints on email and registration_number
     
     #[test]
     fn test_duplicate_email_detection() {
         // This will be tested in integration tests with actual database
-        // The repository correctly maps unique violation errors to DuplicateEmail
     }
 
     // Property 4: Registration data persistence round-trip
-    // This will be validated in integration tests (Task 10.5)
-    // The repository uses proper SQL types and serialization
 }

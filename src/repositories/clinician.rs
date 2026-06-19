@@ -23,7 +23,7 @@ impl ClinicianRepository {
         Self { pool }
     }
 
-    /// AC-05: Check if email is already registered
+    /// Check if email is already registered
     pub async fn email_exists(&self, email: &str) -> Result<bool, ClinicianRepoError> {
         let row: Option<(i64,)> =
             sqlx::query_as("SELECT COUNT(*) FROM users WHERE email = $1")
@@ -33,17 +33,17 @@ impl ClinicianRepository {
         Ok(row.map(|(c,)| c > 0).unwrap_or(false))
     }
 
-    /// AC-02: Create user + clinician row atomically
+    /// Create user + clinician row atomically. OTP-only auth: the
+
     pub async fn create_clinician(
         &self,
         tx: &mut Transaction<'_, Postgres>,
         email: &str,
     ) -> Result<Uuid, ClinicianRepoError> {
-        // Create a minimal user row (email-only auth)
         let user_id: Uuid = sqlx::query_scalar(
             r#"
-            INSERT INTO users (id, first_name, last_name, email, password_hash, role)
-            VALUES (gen_random_uuid(), '', '', $1, '', 'staff')
+            INSERT INTO users (first_name, last_name, email, role)
+            VALUES ('', '', $1, 'health_worker')
             RETURNING id
             "#,
         )
@@ -66,7 +66,7 @@ impl ClinicianRepository {
         Ok(clinician_id)
     }
 
-    /// AC-03: Save completed profile fields
+    /// Save completed profile fields
     pub async fn update_profile(
         &self,
         clinician_id: Uuid,
@@ -116,7 +116,7 @@ impl ClinicianRepository {
         Ok(())
     }
 
-    /// AC-04: Upsert bank account (encrypted account number)
+    /// Upsert bank account (encrypted account number)
     pub async fn upsert_bank_account(
         &self,
         clinician_id: Uuid,

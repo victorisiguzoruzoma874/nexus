@@ -5,9 +5,7 @@ use uuid::Uuid;
 use utoipa::ToSchema;
 use validator::Validate;
 
-// ---------------------------------------------------------------------------
 // Enums
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type, ToSchema)]
 #[sqlx(type_name = "clinician_role", rename_all = "snake_case")]
@@ -22,9 +20,7 @@ pub enum ClinicianRole {
     Other,
 }
 
-// ---------------------------------------------------------------------------
 // DB row types
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, FromRow)]
 pub struct OtpCode {
@@ -47,11 +43,9 @@ pub struct ClinicianBankAccount {
     pub updated_at: DateTime<Utc>,
 }
 
-// ---------------------------------------------------------------------------
 // Request / response types
-// ---------------------------------------------------------------------------
 
-/// AC-01: Send OTP to email
+/// Send OTP to email
 #[derive(Debug, Deserialize, Validate, ToSchema)]
 pub struct SendOtpRequest {
     #[validate(email(message = "A valid email address is required"))]
@@ -59,7 +53,7 @@ pub struct SendOtpRequest {
     pub email: String,
 }
 
-/// AC-02: Verify OTP and create account
+/// Verify OTP and create account
 #[derive(Debug, Deserialize, Validate, ToSchema)]
 pub struct VerifyOtpRequest {
     #[validate(email(message = "A valid email address is required"))]
@@ -68,7 +62,7 @@ pub struct VerifyOtpRequest {
     pub otp: String,
 }
 
-/// AC-03: Complete clinician profile
+/// Complete clinician profile
 #[derive(Debug, Deserialize, Validate, ToSchema)]
 pub struct CompleteProfileRequest {
     #[validate(length(min = 1, max = 100))]
@@ -81,7 +75,7 @@ pub struct CompleteProfileRequest {
     pub specialty: crate::models::clinician::ClinicalSpecialty,
 }
 
-/// AC-04: Add bank account
+/// Add bank account
 #[derive(Debug, Deserialize, Validate, ToSchema)]
 pub struct AddBankAccountRequest {
     #[validate(length(equal = 10, message = "Account number must be 10 digits"))]
@@ -90,9 +84,7 @@ pub struct AddBankAccountRequest {
     pub bank_code: String,
 }
 
-// ---------------------------------------------------------------------------
 // Responses
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct SendOtpResponse {

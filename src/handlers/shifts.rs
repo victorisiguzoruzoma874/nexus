@@ -83,7 +83,6 @@ impl From<shift_service::ShiftPreview> for ShiftPreviewResponse {
 }
 
 /// POST /api/v1/shifts
-/// Create a new shift posting
 #[utoipa::path(
     post,
     path = "/api/v1/shifts",
@@ -104,7 +103,7 @@ pub async fn create_shift(
     headers: HeaderMap,
     Json(payload): Json<CreateShiftRequest>,
 ) -> AppResult<(StatusCode, Json<Shift>)> {
-    payload.validate().map_err(|e| AppError::Validation(e.to_string()))?;
+    payload.validate(). map_err(|e| AppError::Validation(e.to_string()))?;
 
     let claims = extract_claims(&headers)?;
     let created_by = Uuid::parse_str(&claims.sub)
@@ -166,7 +165,6 @@ pub async fn list_shifts(
 }
 
 /// POST /api/v1/shifts/preview
-/// AC-06: Preview shift before publishing
 #[utoipa::path(
     post,
     path = "/api/v1/shifts/preview",
@@ -184,7 +182,7 @@ pub async fn preview_shift(
     State(state): State<AppState>,
     Json(payload): Json<CreateShiftRequest>,
 ) -> AppResult<Json<ShiftPreviewResponse>> {
-    payload.validate().map_err(|e| AppError::Validation(e.to_string()))?;
+    payload.validate(). map_err(|e| AppError::Validation(e.to_string()))?;
 
     match state.shift_service.preview_shift(&payload).await {
         Ok(preview) => Ok(Json(preview.into())),
@@ -193,7 +191,6 @@ pub async fn preview_shift(
 }
 
 /// GET /api/v1/shifts/{shift_id}
-/// Get shift details
 #[utoipa::path(
     get,
     path = "/api/v1/shifts/{shift_id}",
@@ -242,7 +239,7 @@ pub async fn express_interest(
     Path(shift_id): Path<Uuid>,
     Json(payload): Json<ShiftInterestRequest>,
 ) -> AppResult<StatusCode> {
-    payload.validate().map_err(|e| AppError::Validation(e.to_string()))?;
+    payload.validate(). map_err(|e| AppError::Validation(e.to_string()))?;
 
     state
         .shift_service
@@ -276,7 +273,7 @@ pub async fn apply_for_shift(
     Path(shift_id): Path<Uuid>,
     Json(payload): Json<ShiftApplicationRequest>,
 ) -> AppResult<StatusCode> {
-    payload.validate().map_err(|e| AppError::Validation(e.to_string()))?;
+    payload.validate(). map_err(|e| AppError::Validation(e.to_string()))?;
 
     state
         .shift_service
@@ -645,6 +642,40 @@ pub async fn request_handover_revision(
     state
         .shift_service
         .request_handover_revision(shift_id, requester_user_id, payload.revision_notes)
+        .await
+        .map(|_| StatusCode::NO_CONTENT)
+        .map_err(map_shift_error)
+}
+
+/// POST /api/v1/shifts/{shift_id}/handover/approve
+#[utoipa::path(
+    post,
+    path = "/api/v1/shifts/{shift_id}/handover/approve",
+    params(
+        ("shift_id" = Uuid, Path, description = "Shift unique identifier"),
+    ),
+    responses(
+        (status = 204, description = "Handover approved"),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Not the shift creator", body = ErrorResponse),
+        (status = 404, description = "Shift not found", body = ErrorResponse),
+        (status = 409, description = "No handover submitted, or already approved", body = ErrorResponse)
+    ),
+    tag = "shifts",
+    summary = "Approve the handover (hospital)",
+    description = "Marks the handover as approved by the hospital. The PayoutScheduler picks up approved shifts on its next tick and disburses the clinician's net pay via SafeHaven."
+)]
+pub async fn approve_handover(
+    State(state): State<AppState>,
+    Path(shift_id): Path<Uuid>,
+    headers: HeaderMap,
+) -> AppResult<StatusCode> {
+    let claims = extract_claims(&headers)?;
+    let requester_user_id = Uuid::parse_str(&claims.sub)
+        .map_err(|_| AppError::Unauthorized("Invalid user ID in token".to_string()))?;
+    state
+        .shift_service
+        .approve_handover(shift_id, requester_user_id)
         .await
         .map(|_| StatusCode::NO_CONTENT)
         .map_err(map_shift_error)
@@ -1090,7 +1121,7 @@ pub async fn assign_shift(
     Path(shift_id): Path<Uuid>,
     Json(payload): Json<ShiftAssignRequest>,
 ) -> AppResult<StatusCode> {
-    payload.validate().map_err(|e| AppError::Validation(e.to_string()))?;
+    payload.validate(). map_err(|e| AppError::Validation(e.to_string()))?;
 
     state
         .shift_service
@@ -1123,7 +1154,7 @@ pub async fn cancel_shift(
     Path(shift_id): Path<Uuid>,
     Json(payload): Json<ShiftCancelRequest>,
 ) -> AppResult<StatusCode> {
-    payload.validate().map_err(|e| AppError::Validation(e.to_string()))?;
+    payload.validate(). map_err(|e| AppError::Validation(e.to_string()))?;
 
     state
         .shift_service
@@ -1156,7 +1187,7 @@ pub async fn reschedule_shift(
     Path(shift_id): Path<Uuid>,
     Json(payload): Json<ShiftRescheduleRequest>,
 ) -> AppResult<StatusCode> {
-    payload.validate().map_err(|e| AppError::Validation(e.to_string()))?;
+    payload.validate(). map_err(|e| AppError::Validation(e.to_string()))?;
 
     state
         .shift_service
@@ -1205,12 +1236,10 @@ fn map_shift_error(e: ShiftServiceError) -> AppError {
         }
         ShiftServiceError::InvalidStatus(msg) => AppError::Conflict(msg),
         ShiftServiceError::TooManyActiveShifts => AppError::Conflict(
-            "You have 10 active shifts. Complete or cancel some before creating more".to_string(),
-        ),
+            "You have 10 active shifts. Complete or cancel some before creating more".to_string(), ),
         ShiftServiceError::NotInterested => AppError::Conflict(
             "Hospital can only offer this shift to a clinician who expressed interest"
-                .to_string(),
-        ),
+                .to_string(), ),
         ShiftServiceError::DuplicateOffer => {
             AppError::Conflict("Clinician already has an offer for this shift".to_string())
         }
@@ -1225,45 +1254,44 @@ fn map_shift_error(e: ShiftServiceError) -> AppError {
             AppError::Forbidden("Authenticated user has no clinician profile".to_string())
         }
         ShiftServiceError::ScheduleConflict => AppError::Conflict(
-            "Shift overlaps with another accepted shift".to_string(),
-        ),
+            "Shift overlaps with another accepted shift".to_string(), ),
         ShiftServiceError::TooEarlyToClockIn => AppError::Conflict(
-            "Clock-in is only allowed within 1 hour of the scheduled start time".to_string(),
-        ),
+            "Clock-in is only allowed within 1 hour of the scheduled start time".to_string(), ),
         ShiftServiceError::MissedShift => AppError::Conflict(
-            "Shift was missed (more than 60 minutes late). Cannot clock in.".to_string(),
-        ),
+            "Shift was missed (more than 60 minutes late). Cannot clock in.".to_string(), ),
         ShiftServiceError::OutOfGeofence(meters) => AppError::Conflict(format!(
             "You are {} metres from the hospital — outside the clock-in geofence",
             meters
         )),
         ShiftServiceError::HandoverRequired => AppError::Conflict(
-            "Handover must be submitted before clock-out".to_string(),
-        ),
+            "Handover must be submitted before clock-out".to_string(), ),
         ShiftServiceError::HandoverEditWindowClosed => AppError::Conflict(
-            "Handover edit window (1 hour after clock-out) has closed".to_string(),
-        ),
+            "Handover edit window (1 hour after clock-out) has closed".to_string(), ),
         ShiftServiceError::RevisionWindowClosed => AppError::Conflict(
-            "Hospital revision window (24 hours after clock-out) has closed".to_string(),
-        ),
+            "Hospital revision window (24 hours after clock-out) has closed".to_string(), ),
         ShiftServiceError::DuplicateRating => {
             AppError::Conflict("Rating already submitted for this shift".to_string())
         }
         ShiftServiceError::RatingWindowClosed => AppError::Conflict(
-            "Rating submission window (7 days after shift completion) has closed".to_string(),
-        ),
+            "Rating submission window (7 days after shift completion) has closed".to_string(), ),
         ShiftServiceError::RatingNotFound => AppError::NotFound("Rating not found".to_string()),
         ShiftServiceError::RatingEditWindowClosed => AppError::Conflict(
-            "Rating edit window (48 hours) has closed".to_string(),
-        ),
+            "Rating edit window (48 hours) has closed".to_string(), ),
         ShiftServiceError::DuplicateClockinApproval => AppError::Conflict(
-            "Clock-in approval request already exists for this shift".to_string(),
-        ),
+            "Clock-in approval request already exists for this shift".to_string(), ),
         ShiftServiceError::ClockinApprovalNotFound => {
             AppError::NotFound("Clock-in approval request not found".to_string())
         }
         ShiftServiceError::ManualClockinNotApproved => AppError::Conflict(
-            "Manual clock-in requires an approved GPS-fallback request".to_string(),
-        ),
+            "Manual clock-in requires an approved GPS-fallback request".to_string(), ),
+        ShiftServiceError::InsufficientWalletBalance { required, available } => {
+            AppError::PaymentRequired(format!(
+                "Insufficient wallet balance: shift requires {} kobo, wallet has {} kobo. Deposit funds before creating this shift.",
+                required, available
+            ))
+        }
+        ShiftServiceError::WalletError(msg) => {
+            AppError::Conflict(format!("Wallet error: {msg}"))
+        }
     }
 }

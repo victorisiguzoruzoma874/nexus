@@ -60,8 +60,7 @@ fn format_timestamp(ts: DateTime<Utc>) -> String {
 }
 
 pub fn hospital_registration_submitted(hospital_name: &str) -> EmailContent {
-    let subject = "Hospital Registration Submitted - NexusCare".to_string();
-    let text_body = format!(
+    let subject = "Hospital Registration Submitted - NexusCare".to_string(); let text_body = format!(
         "Hello {},\n\nYour hospital registration has been submitted successfully. Our team will review your details and notify you of the outcome.\n\nThank you,\nNexusCare",
         hospital_name
     );
@@ -79,8 +78,7 @@ pub fn hospital_registration_submitted(hospital_name: &str) -> EmailContent {
 }
 
 pub fn hospital_registration_approved(hospital_name: &str, approved_at: DateTime<Utc>) -> EmailContent {
-    let subject = "Hospital Registration Approved - NexusCare".to_string();
-    let text_body = format!(
+    let subject = "Hospital Registration Approved - NexusCare".to_string(); let text_body = format!(
         "Congratulations! Your hospital '{}' has been approved.\n\nApproval Date: {}\n\nYou can now access the platform and start creating shifts.\n\nNexusCare",
         hospital_name,
         format_timestamp(approved_at)
@@ -104,8 +102,7 @@ pub fn hospital_registration_rejected(
     hospital_name: &str,
     reason: &str,
 ) -> EmailContent {
-    let subject = "Hospital Registration Update - NexusCare".to_string();
-    let text_body = format!(
+    let subject = "Hospital Registration Update - NexusCare".to_string(); let text_body = format!(
         "Your hospital '{}' could not be approved at this time.\n\nReason: {}\n\nIf you have questions, contact support.\n\nNexusCare",
         hospital_name,
         reason
@@ -126,8 +123,7 @@ pub fn hospital_registration_rejected(
 }
 
 pub fn clinician_welcome(first_name: Option<&str>) -> EmailContent {
-    let subject = "Welcome to NexusCare".to_string();
-    let greeting = first_name.unwrap_or("there");
+    let subject = "Welcome to NexusCare".to_string(); let greeting = first_name.unwrap_or("there");
     let text_body = format!(
         "Hello {},\n\nYour clinician account has been created successfully. Complete your profile to start receiving shift opportunities.\n\nNexusCare",
         greeting
@@ -150,8 +146,7 @@ pub fn shift_created(
     role_title: &str,
     scheduled_start: DateTime<Utc>,
 ) -> EmailContent {
-    let subject = "Shift Created - NexusCare".to_string();
-    let text_body = format!(
+    let subject = "Shift Created - NexusCare".to_string(); let text_body = format!(
         "Hello {},\n\nYour shift '{}' has been created and broadcast.\nStart: {}\n\nNexusCare",
         hospital_name,
         role_title,
@@ -179,8 +174,7 @@ pub fn shift_assigned_clinician(
     role_title: &str,
     scheduled_start: DateTime<Utc>,
 ) -> EmailContent {
-    let subject = "Shift Assignment - NexusCare".to_string();
-    let text_body = format!(
+    let subject = "Shift Assignment - NexusCare".to_string(); let text_body = format!(
         "Hello {},\n\nYou have been assigned to a shift at {}.\nRole: {}\nStart: {}\n\nNexusCare",
         clinician_name,
         hospital_name,
@@ -204,8 +198,9 @@ pub fn shift_assigned_clinician(
     EmailContent { subject, text_body, html_body }
 }
 
-/// Tier 3.2 / Tier 3.1 — Sent to each eligible clinician when a shift is
-/// broadcast (or re-broadcast). Per FRS §3.2.5 the body differs by urgency.
+/// Sent to each eligible clinician when a shift is broadcast or re-broadcast
+
+
 pub fn shift_broadcast(
     clinician_first_name: &str,
     hospital_name: &str,
@@ -216,20 +211,16 @@ pub fn shift_broadcast(
     use crate::models::shift::ShiftPriority;
     let (subject, label) = match priority {
         ShiftPriority::Stat => (
-            "STAT shift available - NexusCare".to_string(),
-            "🚨 STAT shift",
+            "STAT shift available - NexusCare".to_string(), "🚨 STAT shift",
         ),
         ShiftPriority::Urgent => (
-            "Urgent shift available - NexusCare".to_string(),
-            "⚠️ Urgent shift",
+            "Urgent shift available - NexusCare".to_string(), "⚠️ Urgent shift",
         ),
         ShiftPriority::Normal => (
-            "New shift available - NexusCare".to_string(),
-            "📍 New shift",
+            "New shift available - NexusCare".to_string(), "📍 New shift",
         ),
         ShiftPriority::Scheduled => (
-            "Scheduled shift available - NexusCare".to_string(),
-            "📅 Scheduled shift",
+            "Scheduled shift available - NexusCare".to_string(), "📅 Scheduled shift",
         ),
     };
 
@@ -260,14 +251,13 @@ pub fn shift_broadcast(
     EmailContent { subject, text_body, html_body }
 }
 
-/// Tier 3.5 — Sent to the hospital when a worker requests a GPS-fallback
-/// clock-in approval (photo of the entrance).
+/// Sent to the hospital when a worker requests a GPS-fallback
+
 pub fn clockin_approval_requested(
     clinician_name: &str,
     role_title: &str,
 ) -> EmailContent {
-    let subject = "Manual Clock-In Requested - NexusCare".to_string();
-    let text_body = format!(
+    let subject = "Manual Clock-In Requested - NexusCare".to_string(); let text_body = format!(
         "{} has requested a manual clock-in for the {} shift because their GPS fix is inaccurate.\n\nReview the photo in the NexusCare app and approve or deny.\n\nNexusCare",
         clinician_name, role_title
     );
@@ -283,13 +273,14 @@ pub fn clockin_approval_requested(
     EmailContent { subject, text_body, html_body }
 }
 
-/// Tier 3.5 — Sent to the worker when their GPS-fallback request is approved.
+/// Sent to the worker when their GPS-fallback request is approved
+
+
 pub fn clockin_approval_approved(
     clinician_first_name: &str,
     role_title: &str,
 ) -> EmailContent {
-    let subject = "Manual Clock-In Approved - NexusCare".to_string();
-    let text_body = format!(
+    let subject = "Manual Clock-In Approved - NexusCare".to_string(); let text_body = format!(
         "Hello {},\n\nYour manual clock-in request for the {} shift was approved.\nYou can now clock in via the NexusCare app.\n\nNexusCare",
         clinician_first_name, role_title
     );
@@ -306,18 +297,18 @@ pub fn clockin_approval_approved(
     EmailContent { subject, text_body, html_body }
 }
 
-/// Tier 3.5 — Sent to the worker when their GPS-fallback request is denied.
+/// Sent to the worker when their GPS-fallback request is denied
+
+
 pub fn clockin_approval_denied(
     clinician_first_name: &str,
     role_title: &str,
     notes: Option<&str>,
 ) -> EmailContent {
-    let subject = "Manual Clock-In Denied - NexusCare".to_string();
-    let notes_line = notes
-        .filter(|s| !s.trim().is_empty())
+    let subject = "Manual Clock-In Denied - NexusCare".to_string(); let notes_line = notes
+        .filter(|s| !s.trim(). is_empty())
         .map(|n| format!("\nNotes: {n}"))
-        .unwrap_or_default();
-    let text_body = format!(
+        .unwrap_or_default(); let text_body = format!(
         "Hello {},\n\nYour manual clock-in request for the {} shift was denied.{}\n\nContact the hospital admin if you believe this is in error.\n\nNexusCare",
         clinician_first_name, role_title, notes_line
     );
@@ -329,7 +320,7 @@ pub fn clockin_approval_denied(
              <p style=\"margin:0 0 12px 0;\">Contact the hospital admin if you believe this is in error.</p>
              <p style=\"margin:0;\">NexusCare</p>",
             clinician_first_name, role_title,
-            notes.filter(|s| !s.trim().is_empty())
+            notes.filter(|s| !s.trim(). is_empty())
                 .map(|n| format!("<br/><strong>Notes:</strong> {n}"))
                 .unwrap_or_default()
         ),
@@ -337,14 +328,13 @@ pub fn clockin_approval_denied(
     EmailContent { subject, text_body, html_body }
 }
 
-/// Tier 3.4 — Sent to the worker when their handover is auto-approved after
-/// the 48h hospital-action window lapses (BR-F1-39).
+/// Sent to the worker when their handover is auto-approved after
+
 pub fn handover_auto_approved(
     clinician_first_name: &str,
     role_title: &str,
 ) -> EmailContent {
-    let subject = "Handover Auto-Approved - NexusCare".to_string();
-    let text_body = format!(
+    let subject = "Handover Auto-Approved - NexusCare".to_string(); let text_body = format!(
         "Hello {},\n\nYour handover for the {} shift was auto-approved after 48 hours without hospital action.\nPayment processing can proceed.\n\nNexusCare",
         clinician_first_name, role_title
     );
@@ -362,11 +352,10 @@ pub fn handover_auto_approved(
     EmailContent { subject, text_body, html_body }
 }
 
-/// Tier 3.3 — Sent to the hospital when a shift offer to a clinician expires
-/// (the worker did not respond within the 30-minute window).
+/// Sent to the hospital when a shift offer to a clinician expires
+
 pub fn shift_offer_expired(role_title: &str) -> EmailContent {
-    let subject = "Shift Offer Expired - NexusCare".to_string();
-    let text_body = format!(
+    let subject = "Shift Offer Expired - NexusCare".to_string(); let text_body = format!(
         "The offer for {} expired because the worker did not respond within 30 minutes.\nYou can select the next ranked candidate.\n\nNexusCare",
         role_title
     );
@@ -383,18 +372,18 @@ pub fn shift_offer_expired(role_title: &str) -> EmailContent {
     EmailContent { subject, text_body, html_body }
 }
 
-/// Tier 2.4 — Sent to the hospital when a worker declines a shift offer.
+/// Sent to the hospital when a worker declines a shift offer
+
+
 pub fn shift_offer_declined(
     role_title: &str,
     scheduled_start: DateTime<Utc>,
     reason: Option<&str>,
 ) -> EmailContent {
-    let subject = "Shift Offer Declined - NexusCare".to_string();
-    let reason_line = reason
-        .filter(|s| !s.trim().is_empty())
+    let subject = "Shift Offer Declined - NexusCare".to_string(); let reason_line = reason
+        .filter(|s| !s.trim(). is_empty())
         .map(|r| format!("\nReason: {r}"))
-        .unwrap_or_default();
-    let text_body = format!(
+        .unwrap_or_default(); let text_body = format!(
         "The shift offer was declined.\nRole: {}\nStart: {}{}\n\nYou can select the next ranked candidate.\n\nNexusCare",
         role_title,
         format_timestamp(scheduled_start),
@@ -410,7 +399,7 @@ pub fn shift_offer_declined(
              <p style=\"margin:0;\">NexusCare</p>",
             role_title,
             format_timestamp(scheduled_start),
-            reason.filter(|s| !s.trim().is_empty())
+            reason.filter(|s| !s.trim(). is_empty())
                 .map(|r| format!("<br/><strong>Reason:</strong> {r}"))
                 .unwrap_or_default()
         ),
@@ -419,16 +408,15 @@ pub fn shift_offer_declined(
     EmailContent { subject, text_body, html_body }
 }
 
-/// Tier 2.3 — Sent to a clinician when a hospital sends them a shift offer
-/// (§3.4.5). Offer expires in 30 minutes (BR-F1-21).
+/// Sent to a clinician when a hospital sends them a shift offer
+
 pub fn shift_offered(
     clinician_first_name: &str,
     role_title: &str,
     scheduled_start: DateTime<Utc>,
     expires_at: DateTime<Utc>,
 ) -> EmailContent {
-    let subject = "Shift Offer - NexusCare".to_string();
-    let text_body = format!(
+    let subject = "Shift Offer - NexusCare".to_string(); let text_body = format!(
         "Hello {},\n\nYou have a new shift offer.\nRole: {}\nStart: {}\nOffer expires: {}\n\nOpen the NexusCare app to accept or decline.\n\nNexusCare",
         clinician_first_name,
         role_title,
@@ -461,8 +449,7 @@ pub fn shift_assigned_hospital(
     role_title: &str,
     scheduled_start: DateTime<Utc>,
 ) -> EmailContent {
-    let subject = "Clinician Assigned - NexusCare".to_string();
-    let text_body = format!(
+    let subject = "Clinician Assigned - NexusCare".to_string(); let text_body = format!(
         "Hello {},\n\n{} has been assigned to your shift.\nRole: {}\nStart: {}\n\nNexusCare",
         hospital_name,
         clinician_name,
@@ -492,8 +479,7 @@ pub fn shift_cancelled(
     scheduled_start: DateTime<Utc>,
     reason: &str,
 ) -> EmailContent {
-    let subject = "Shift Cancelled - NexusCare".to_string();
-    let text_body = format!(
+    let subject = "Shift Cancelled - NexusCare".to_string(); let text_body = format!(
         "Hello {},\n\nThe shift '{}' scheduled for {} has been cancelled.\nReason: {}\n\nNexusCare",
         recipient_name,
         role_title,
@@ -522,8 +508,7 @@ pub fn shift_rescheduled(
     role_title: &str,
     scheduled_start: DateTime<Utc>,
 ) -> EmailContent {
-    let subject = "Shift Rescheduled - NexusCare".to_string();
-    let text_body = format!(
+    let subject = "Shift Rescheduled - NexusCare".to_string(); let text_body = format!(
         "Hello {},\n\nThe shift '{}' has been rescheduled.\nNew Start: {}\n\nNexusCare",
         recipient_name,
         role_title,
@@ -546,8 +531,7 @@ pub fn shift_rescheduled(
 }
 
 pub fn email_otp(code: &str, expires_in_minutes: i64) -> EmailContent {
-    let subject = "Your NexusCare verification code".to_string();
-    let text_body = format!(
+    let subject = "Your NexusCare verification code".to_string(); let text_body = format!(
         "Your verification code is {}. It expires in {} minutes.",
         code,
         expires_in_minutes
@@ -567,8 +551,7 @@ pub fn email_otp(code: &str, expires_in_minutes: i64) -> EmailContent {
 }
 
 pub fn password_reset(reset_link: &str) -> EmailContent {
-    let subject = "Reset your NexusCare password".to_string();
-    let text_body = format!(
+    let subject = "Reset your NexusCare password".to_string(); let text_body = format!(
         "Click the link below to reset your password. It expires in 1 hour.\n\n{}\n\nIf you did not request this, ignore this email.",
         reset_link
     );

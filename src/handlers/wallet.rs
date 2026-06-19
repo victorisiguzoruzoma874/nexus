@@ -1,0 +1,341 @@
+// ! Hospital wallet endpoints — gated to HospitalAdmin/SuperAdmin.
+
+use axum::{
+    extract::{Query, State},
+    http::{HeaderMap, StatusCode},
+    Json,
+};
+use serde::Deserialize;
+use utoipa::IntoParams;
+use uuid::Uuid;
+use validator::Validate;
+
+use crate::models::wallet::{
+    CreateDepositRequest, DepositResponse, WalletLedgerEntry, WalletSummary,
+};
+use crate::routes::AppState;
+use crate::services::wallet_service::WalletServiceError;
+use crate::utils::{
+    errors::{AppError, AppResult},
+    extract_claims,
+};
+
+fn hospital_id_from_claims(headers: &HeaderMap) -> Result<Uuid, AppError> {
+    let claims = extract_claims(headers)?;
+    claims
+        .hospital_id
+        .as_deref()
+        .and_then(|s| Uuid::parse_str(s).ok())
+        .ok_or_else(|| AppError::Forbidden("No hospital associated with this account".to_string()))
+}
+
+fn map_wallet_error(e: WalletServiceError) -> AppError {
+    match e {
+        WalletServiceError::Validation(msg) => AppError::Validation(msg),
+        WalletServiceError::WalletNotFound(_) => AppError::NotFound("Wallet not found".to_string()),
+        WalletServiceError::Database(e) => AppError::Database(e),
+        WalletServiceError::SafeHaven(e) => AppError::Conflict(format!("Payment provider error: {e}")),
+        WalletServiceError::Repo(e) => match e {
+            crate::repositories::wallet::WalletRepoError::InsufficientBalance {
+                required,
+                available,
+            } => AppError::Conflict(format!(
+                "Insufficient wallet balance: required {required} kobo, available {available} kobo"
+            )),
+            crate::repositories::wallet::WalletRepoError::NothingToRelease(_) => {
+                AppError::Conflict("No held funds to release".to_string())
+            }
+            crate::repositories::wallet::WalletRepoError::Database(e) => AppError::Database(e),
+        },
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/wallet",
+    responses(
+        (status = 200, description = "Wallet summary", body = WalletSummary),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "No hospital associated with this account", body = ErrorResponse)
+    ),
+    tag = "wallet",
+    summary = "Get the caller hospital's wallet summary",
+    description = "Returns balance + held kobo plus the SafeHaven sub-account details (if provisioned)."
+)]
+pub async fn get_wallet(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> AppResult<Json<WalletSummary>> {
+    let hospital_id = hospital_id_from_claims(&headers)?;
+    let w = state
+        .wallet_service
+        .get_wallet(hospital_id)
+        .await
+        .map_err(map_wallet_error)?;
+    Ok(Json((&w).into()))
+}
+
+#[derive(Debug, Clone, Deserialize, IntoParams)]
+pub struct LedgerQuery {
+    pub page: Option<i64>,
+    pub page_size: Option<i64>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
+pub struct LedgerPage {
+    pub entries: Vec<WalletLedgerEntry>,
+    pub total: i64,
+    pub page: i64,
+    pub page_size: i64,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/wallet/ledger",
+    params(LedgerQuery),
+    responses(
+        (status = 200, description = "Paginated ledger entries", body = LedgerPage),
+        (status = 401, body = ErrorResponse),
+        (status = 403, body = ErrorResponse)
+    ),
+    tag = "wallet",
+    summary = "Paginated wallet ledger (audit trail)",
+    description = "Newest-first list of every wallet mutation: deposit credits, shift holds, releases, payouts, fees, refunds."
+)]
+pub async fn get_ledger(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<LedgerQuery>,
+) -> AppResult<Json<LedgerPage>> {
+    let hospital_id = hospital_id_from_claims(&headers)?;
+    let page = q.page.unwrap_or(1).max(1);
+    let page_size = q.page_size.unwrap_or(50).clamp(1, 200);
+    let (entries, total) = state
+        .wallet_service
+        .list_ledger(hospital_id, page, page_size)
+        .await
+        .map_err(map_wallet_error)?;
+    Ok(Json(LedgerPage { entries, total, page, page_size }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/wallet/deposits",
+    request_body = CreateDepositRequest,
+    responses(
+        (status = 201, description = "Deposit virtual account minted", body = DepositResponse),
+        (status = 401, body = ErrorResponse),
+        (status = 403, body = ErrorResponse),
+        (status = 409, description = "Payment provider error", body = ErrorResponse),
+        (status = 422, description = "Validation error", body = ErrorResponse)
+    ),
+    tag = "wallet",
+    summary = "Request a deposit virtual account",
+    description = "Returns a SafeHaven virtual account the hospital can transfer into. We credit the wallet automatically when SafeHaven fires the inbound webhook."
+)]
+pub async fn create_deposit(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<CreateDepositRequest>,
+) -> AppResult<(StatusCode, Json<DepositResponse>)> {
+    payload
+        .validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
+    let hospital_id = hospital_id_from_claims(&headers)?;
+    let row = state
+        .wallet_service
+        .request_deposit(hospital_id, payload.amount_kobo)
+        .await
+        .map_err(map_wallet_error)?;
+    Ok((StatusCode::CREATED, Json(row.into())))
+}
+
+#[derive(Debug, Clone, Deserialize, IntoParams)]
+pub struct DepositsQuery {
+    pub limit: Option<i64>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/wallet/deposits",
+    params(DepositsQuery),
+    responses(
+        (status = 200, description = "Recent deposit requests", body = Vec<DepositResponse>),
+        (status = 401, body = ErrorResponse),
+        (status = 403, body = ErrorResponse)
+    ),
+    tag = "wallet",
+    summary = "List recent deposit requests"
+)]
+pub async fn list_deposits(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<DepositsQuery>,
+) -> AppResult<Json<Vec<DepositResponse>>> {
+    let hospital_id = hospital_id_from_claims(&headers)?;
+    let limit = q.limit.unwrap_or(25).clamp(1, 100);
+    let rows = state
+        .wallet_service
+        .list_deposits(hospital_id, limit)
+        .await
+        .map_err(map_wallet_error)?;
+    Ok(Json(rows.into_iter(). map(DepositResponse::from).collect()))
+}
+
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
+pub struct PayoutPage {
+    pub payouts: Vec<crate::services::payout_service::PayoutRow>,
+    pub total: i64,
+    pub page: i64,
+    pub page_size: i64,
+}
+
+#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+pub struct PayoutStatusResponse {
+    pub payout_id: Uuid,
+    pub status: String,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/wallet/payouts",
+    params(LedgerQuery),
+    responses(
+        (status = 200, description = "Paginated payout history", body = PayoutPage),
+        (status = 401, body = ErrorResponse),
+        (status = 403, body = ErrorResponse)
+    ),
+    tag = "wallet",
+    summary = "List this hospital's payouts",
+    description = "Payout transactions (status, amount, shift, provider reference) newest-first."
+)]
+pub async fn list_payouts(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<LedgerQuery>,
+) -> AppResult<Json<PayoutPage>> {
+    let hospital_id = hospital_id_from_claims(&headers)?;
+    let page = q.page.unwrap_or(1).max(1);
+    let page_size = q.page_size.unwrap_or(50).clamp(1, 200);
+    let (payouts, total) = state
+        .payout_service
+        .list_payouts(hospital_id, page, page_size)
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("{e}")))?;
+    Ok(Json(PayoutPage { payouts, total, page, page_size }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/wallet/payouts/{payout_id}/status",
+    params(("payout_id" = Uuid, Path, description = "Payout (billing transaction) id")),
+    responses(
+        (status = 200, description = "Current payout status (refreshed from SafeHaven if pending)", body = PayoutStatusResponse),
+        (status = 401, body = ErrorResponse),
+        (status = 403, body = ErrorResponse),
+        (status = 404, description = "Payout not found", body = ErrorResponse)
+    ),
+    tag = "wallet",
+    summary = "Get/refresh a payout's transfer status"
+)]
+pub async fn get_payout_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path(payout_id): axum::extract::Path<Uuid>,
+) -> AppResult<Json<PayoutStatusResponse>> {
+    // Scope check: the payout must belong to the caller's hospital.
+    let hospital_id = hospital_id_from_claims(&headers)?;
+    let owner: Option<Uuid> = sqlx::query_scalar(
+        "SELECT hospital_id FROM billing_transactions WHERE id = $1 AND event_type = 'payout'",
+    )
+    .bind(payout_id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(AppError::Database)?;
+    match owner {
+        Some(h) if h == hospital_id => {}
+        Some(_) => return Err(AppError::Forbidden("Payout belongs to another hospital".to_string())),
+        None => return Err(AppError::NotFound("Payout not found".to_string())),
+    }
+
+    let status = state
+        .payout_service
+        .refresh_payout_status(payout_id)
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("{e}")))?;
+    Ok(Json(PayoutStatusResponse { payout_id, status }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/wallet/statement",
+    responses(
+        (status = 200, description = "SafeHaven transfer history for the hospital sub-account"),
+        (status = 401, body = ErrorResponse),
+        (status = 403, body = ErrorResponse),
+        (status = 404, description = "No sub-account provisioned yet", body = ErrorResponse)
+    ),
+    tag = "wallet",
+    summary = "Account statement (SafeHaven transfer history)"
+)]
+pub async fn get_statement(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> AppResult<Json<serde_json::Value>> {
+    let hospital_id = hospital_id_from_claims(&headers)?;
+    let wallet = state
+        .wallet_service
+        .get_wallet(hospital_id)
+        .await
+        .map_err(map_wallet_error)?;
+    let account_id = wallet
+        .safehaven_account_id
+        .ok_or_else(|| AppError::NotFound("No SafeHaven sub-account provisioned yet".to_string()))?;
+    let data = state
+        .safehaven
+        .list_transfers(&account_id, 0, 100, None)
+        .await
+        .map_err(|e| AppError::Conflict(format!("Payment provider error: {e}")))?;
+    Ok(Json(data))
+}
+
+#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+pub struct PayoutRetryResponse {
+    pub shift_id: Uuid,
+    pub initiated: bool,
+    pub message: String,
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/admin/payouts/{shift_id}/retry",
+    params(("shift_id" = Uuid, Path, description = "Shift whose payout to retry")),
+    responses(
+        (status = 200, description = "Retry outcome", body = PayoutRetryResponse),
+        (status = 401, body = ErrorResponse),
+        (status = 403, body = ErrorResponse)
+    ),
+    tag = "admin",
+    summary = "Manually retry a failed payout (SuperAdmin)"
+)]
+pub async fn retry_payout(
+    State(state): State<AppState>,
+    axum::extract::Path(shift_id): axum::extract::Path<Uuid>,
+) -> AppResult<Json<PayoutRetryResponse>> {
+    let initiated = state
+        .payout_service
+        .retry_payout(shift_id)
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("{e}")))?;
+    let message = if initiated {
+        "Payout transfer initiated".to_string()
+    } else {
+        "No retry performed (shift not payable, already paid/in-flight, or retry budget exhausted)".to_string()
+    };
+    Ok(Json(PayoutRetryResponse { shift_id, initiated, message }))
+}
+
+#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+pub struct ErrorResponse {
+    pub error: String,
+}

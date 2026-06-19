@@ -7,9 +7,7 @@ use utoipa::ToSchema;
 
 use crate::models::clinician_registration::ClinicianRole;
 
-// ---------------------------------------------------------------------------
 // Enums
-// ---------------------------------------------------------------------------
 
 /// Clinical specialty of a clinician.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type, utoipa::ToSchema)]
@@ -46,12 +44,9 @@ pub enum ClinicianAvailability {
     Unavailable,
 }
 
-// ---------------------------------------------------------------------------
 // Clinician profile
-// ---------------------------------------------------------------------------
 
 /// A clinician (doctor, nurse, technician) registered on the NexusCare platform.
-/// Shown in the Workforce Pool panel on the Clinical Dashboard.
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct Clinician {
     pub id: Uuid,
@@ -68,8 +63,7 @@ pub struct Clinician {
     pub rating: f32,
     /// Total number of ratings contributing to the average
     pub rating_count: i32,
-    /// Cached acceptance rate as a percentage 0–100 used by the §3.4.3
-    /// ranking algorithm. `None` until the clinician has at least one offer.
+    /// Cached acceptance rate as a percentage 0–100 used by the
     #[sqlx(default)]
     pub acceptance_rate_pct: Option<f32>,
 
@@ -88,13 +82,9 @@ pub struct Clinician {
     pub updated_at: DateTime<Utc>,
 }
 
-// ---------------------------------------------------------------------------
 // Clinician location (real-time proximity for Workforce Pool)
-// ---------------------------------------------------------------------------
 
 /// Last known GPS position of a clinician.
-/// Used to calculate distance shown in the Workforce Pool (e.g. "2.4km", "0.8km").
-/// Updated by the clinician's mobile app.
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct ClinicianLocation {
     pub id: Uuid,
@@ -106,9 +96,7 @@ pub struct ClinicianLocation {
     pub recorded_at: DateTime<Utc>,
 }
 
-// ---------------------------------------------------------------------------
 // Response types
-// ---------------------------------------------------------------------------
 
 /// Clinician card shown in the Workforce Pool panel.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -137,9 +125,7 @@ pub struct UpdateClinicianAvailabilityRequest {
     pub longitude: Option<f64>,
 }
 
-// ---------------------------------------------------------------------------
 // Admin response types
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct ClinicianAdminSummary {

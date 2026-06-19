@@ -5,3 +5,7 @@ pub mod registration;
 pub mod clinician_registration;
 pub mod shifts;
 pub mod admin;
+pub mod wallet;
+pub mod webhooks;
+pub mod earnings;
+pub mod identity;

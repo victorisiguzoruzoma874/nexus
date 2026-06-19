@@ -16,12 +16,12 @@ use crate::{
 };
 
 /// POST /api/v1/hospitals
-/// Step 1 (Setup): Register a new hospital with basic institutional credentials.
+
 pub async fn create_hospital(
     State(state): State<AppState>,
     Json(payload): Json<CreateHospitalRequest>,
 ) -> AppResult<(StatusCode, Json<HospitalResponse>)> {
-    payload.validate().map_err(|e| AppError::Validation(e.to_string()))?;
+    payload.validate(). map_err(|e| AppError::Validation(e.to_string()))?;
 
     // Check for duplicate registration number or email
     let existing: Option<(Uuid,)> = sqlx::query_as(
@@ -34,8 +34,7 @@ pub async fn create_hospital(
 
     if existing.is_some() {
         return Err(AppError::Conflict(
-            "A hospital with this registration number or email already exists".to_string(),
-        ));
+            "A hospital with this registration number or email already exists".to_string(), ));
     }
 
     let hospital: Hospital = sqlx::query_as(
@@ -88,7 +87,7 @@ pub async fn update_hospital(
     Path(id): Path<Uuid>,
     Json(payload): Json<UpdateHospitalRequest>,
 ) -> AppResult<Json<HospitalResponse>> {
-    payload.validate().map_err(|e| AppError::Validation(e.to_string()))?;
+    payload.validate(). map_err(|e| AppError::Validation(e.to_string()))?;
 
     let hospital: Option<Hospital> = sqlx::query_as(
         r#"
@@ -119,7 +118,7 @@ pub async fn update_hospital(
 }
 
 /// PATCH /api/v1/hospitals/:id/advance-step
-/// Advance the hospital's registration step (Setup → Legal → Done).
+
 pub async fn advance_registration_step(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
@@ -161,7 +160,7 @@ pub async fn advance_registration_step(
 }
 
 /// GET /api/v1/hospitals
-/// List all hospitals (admin use).
+
 pub async fn list_hospitals(
     State(state): State<AppState>,
 ) -> AppResult<Json<Vec<HospitalResponse>>> {
@@ -176,5 +175,5 @@ pub async fn list_hospitals(
     .fetch_all(&state.pool)
     .await?;
 
-    Ok(Json(hospitals.into_iter().map(HospitalResponse::from).collect()))
+    Ok(Json(hospitals.into_iter(). map(HospitalResponse::from).collect()))
 }

@@ -40,14 +40,14 @@ impl AuthService {
         Self { pool, email_outbox }
     }
 
-    // -----------------------------------------------------------------------
-    // AC-01: Email OTP login — step 1: send OTP
-    // -----------------------------------------------------------------------
+    // Email OTP login — step 1: send OTP
     pub async fn send_login_otp(&self, email: &str) -> Result<(), AuthError> {
+        let email = email.trim().to_lowercase();
+
         // Verify email belongs to an active user
         let exists: Option<(bool,)> =
             sqlx::query_as("SELECT is_active FROM users WHERE email = $1")
-                .bind(email)
+                .bind(&email)
                 .fetch_optional(&self.pool)
                 .await?;
 
@@ -62,32 +62,32 @@ impl AuthService {
         sqlx::query(
             "INSERT INTO login_email_otp_codes (email, code, expires_at) VALUES ($1, $2, $3)",
         )
-        .bind(email)
+        .bind(&email)
         .bind(&code)
         .bind(expires_at)
         .execute(&self.pool)
         .await?;
 
         let content = email_templates::email_otp(&code, 10);
-        self.email_outbox.enqueue_email(email, &content).await?;
+        self.email_outbox.enqueue_email(&email, &content).await?;
         Ok(())
     }
 
-    // -----------------------------------------------------------------------
-    // AC-01: Email OTP login — step 2: verify OTP and issue tokens
-    // -----------------------------------------------------------------------
+    // Email OTP login — step 2: verify OTP and issue tokens
     pub async fn verify_login_otp(
         &self,
         email: &str,
         code: &str,
     ) -> Result<LoginResponse, AuthError> {
+        let email = email.trim().to_lowercase();
+
         // Validate OTP
         let otp: Option<(Uuid, bool)> = sqlx::query_as(
             "SELECT id, used FROM login_email_otp_codes
              WHERE email = $1 AND code = $2 AND expires_at > NOW()
              ORDER BY created_at DESC LIMIT 1",
         )
-        .bind(email)
+        .bind(&email)
         .bind(code)
         .fetch_optional(&self.pool)
         .await?;
@@ -103,13 +103,11 @@ impl AuthService {
             .execute(&self.pool)
             .await?;
 
-        let user = self.fetch_user_by_email(email).await?;
+        let user = self.fetch_user_by_email(&email).await?;
         self.complete_login(user).await
     }
 
-    // -----------------------------------------------------------------------
-    // AC-02: Email/password login (existing login handler delegates here)
-    // -----------------------------------------------------------------------
+    // Email/password login (existing login handler delegates here)
     pub async fn login_with_password(
         &self,
         email: &str,
@@ -138,9 +136,7 @@ impl AuthService {
         self.complete_login(user).await
     }
 
-    // -----------------------------------------------------------------------
-    // AC-03: Forgot password — send reset link
-    // -----------------------------------------------------------------------
+    // Forgot password — send reset link
     pub async fn forgot_password(&self, email: &str) -> Result<(), AuthError> {
         let user: Option<(Uuid,)> =
             sqlx::query_as("SELECT id FROM users WHERE email = $1 AND is_active = TRUE")
@@ -175,9 +171,7 @@ impl AuthService {
         Ok(())
     }
 
-    // -----------------------------------------------------------------------
-    // AC-03: Reset password with token
-    // -----------------------------------------------------------------------
+    // Reset password with token
     pub async fn reset_password(
         &self,
         raw_token: &str,
@@ -201,7 +195,7 @@ impl AuthService {
         let password_hash = hash_password(new_password)
             .map_err(|e| AuthError::Internal(e.to_string()))?;
 
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.pool.begin(). await?;
 
         sqlx::query("UPDATE users SET password_hash = $1 WHERE id = $2")
             .bind(&password_hash)
@@ -214,13 +208,11 @@ impl AuthService {
             .execute(&mut *tx)
             .await?;
 
-        tx.commit().await?;
+        tx.commit(). await?;
         Ok(())
     }
 
-    // -----------------------------------------------------------------------
-    // AC-04: Refresh access token
-    // -----------------------------------------------------------------------
+    // Refresh access token
     pub async fn refresh_token(&self, raw_token: &str) -> Result<LoginResponse, AuthError> {
         let token_hash = sha256_hex(raw_token);
 
@@ -247,9 +239,7 @@ impl AuthService {
         self.complete_login(user).await
     }
 
-    // -----------------------------------------------------------------------
-    // AC-05: Logout — revoke refresh token
-    // -----------------------------------------------------------------------
+    // Logout — revoke refresh token
     pub async fn logout(&self, raw_token: &str) -> Result<(), AuthError> {
         let token_hash = sha256_hex(raw_token);
         sqlx::query("UPDATE refresh_tokens SET revoked = TRUE WHERE token_hash = $1")
@@ -259,9 +249,7 @@ impl AuthService {
         Ok(())
     }
 
-    // -----------------------------------------------------------------------
     // Internal helpers
-    // -----------------------------------------------------------------------
 
     async fn complete_login(&self, user: User) -> Result<LoginResponse, AuthError> {
         // Update last_login_at
@@ -275,7 +263,7 @@ impl AuthService {
 
         let refresh_token = self.issue_refresh_token(user.id).await?;
 
-        // AC-06: role-based redirect path
+        // role-based redirect path
         let redirect_to = match user.role {
             UserRole::SuperAdmin => "/dashboard/super-admin",
             UserRole::HospitalAdmin => "/dashboard/hospital",
@@ -286,8 +274,7 @@ impl AuthService {
         Ok(LoginResponse {
             access_token,
             refresh_token,
-            token_type: "Bearer".to_string(),
-            expires_in: expiry_secs,
+            token_type: "Bearer".to_string(), expires_in: expiry_secs,
             redirect_to,
             user: UserResponse::from(user),
         })
@@ -298,7 +285,7 @@ impl AuthService {
         let token_hash = sha256_hex(&raw);
         let days: i64 = std::env::var("JWT_REFRESH_EXPIRY_DAYS")
             .ok()
-            .and_then(|v| v.parse().ok())
+            .and_then(|v| v.parse(). ok())
             .unwrap_or(30);
         let expires_at = Utc::now() + Duration::days(days);
 
@@ -339,9 +326,7 @@ impl AuthService {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Pure functions
-// ---------------------------------------------------------------------------
 
 fn generate_otp() -> String {
     use rand::Rng;
@@ -358,22 +343,18 @@ fn issue_access_token(user: &User) -> Result<(String, u64), String> {
     let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_default();
     let expiry_hours: u64 = std::env::var("JWT_EXPIRY_HOURS")
         .ok()
-        .and_then(|v| v.parse().ok())
+        .and_then(|v| v.parse(). ok())
         .unwrap_or(24);
 
     let now = Utc::now().timestamp() as usize;
     let claims = Claims {
-        sub: user.id.to_string(),
-        email: user.email.clone(),
-        role: user.role.clone(),
-        hospital_id: user.hospital_id.map(|id| id.to_string()),
+        sub: user.id.to_string(), email: user.email.clone(), role: user.role.clone(), hospital_id: user.hospital_id.map(|id| id.to_string()),
         exp: now + (expiry_hours as usize * 3600),
         iat: now,
     };
 
     let token = encode(
-        &Header::default(),
-        &claims,
+        &Header::default(), &claims,
         &EncodingKey::from_secret(jwt_secret.as_bytes()),
     )
     .map_err(|e| e.to_string())?;

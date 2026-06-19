@@ -5,9 +5,7 @@ use uuid::Uuid;
 use validator::Validate;
 use utoipa::ToSchema;
 
-// ---------------------------------------------------------------------------
 // Enums
-// ---------------------------------------------------------------------------
 
 /// Lifecycle status of a shift.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type, ToSchema)]
@@ -57,7 +55,6 @@ pub enum ShiftType {
 }
 
 /// Broad role category selected in Step 1 of the shift wizard.
-/// Separate from the free-text `role_title` and `specialty`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type, ToSchema)]
 #[sqlx(type_name = "role_category", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
@@ -115,12 +112,9 @@ pub enum ClockinMethod {
     Virtual,
 }
 
-// ---------------------------------------------------------------------------
 // Shift
-// ---------------------------------------------------------------------------
 
 /// A shift posting created by a hospital.
-/// Shown in "Today's Active Shifts" and "Open Shifts Needing Staff" on the dashboard.
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct Shift {
     pub id: Uuid,
@@ -175,7 +169,6 @@ pub struct Shift {
     pub grand_total_kobo: Option<i64>,
 
     /// Human-readable label for the shift, e.g. "Night Shift: General Ward A"
-    /// Shown in the "Current Progress" card during wizard navigation
     pub shift_label: Option<String>,
 
     /// Free-text job description ("We need an experienced Emergency Doctor...")
@@ -188,27 +181,20 @@ pub struct Shift {
     /// The user who created this shift posting
     pub created_by: Uuid,
     /// Whether the hospital confirmed the institutional verification consent
-    /// shown in Step 4: "By broadcasting this shift, you confirm that [hospital]
-    /// is authorized to match this request with verified clinicians in the LUTH network."
     pub broadcast_consent_confirmed: bool,
     /// Number of matched clinicians the shift was visible to at publish time
-    /// ("The shift will be visible to 48 matched clinicians immediately.")
     pub matched_clinicians_at_publish: Option<i32>,
     /// When the shift was broadcast to the clinician marketplace (Step 5 action)
     pub broadcast_at: Option<DateTime<Utc>>,
     /// Billing is triggered only when a clinician is successfully booked
-    /// ("Charges will only apply once a clinician is successfully booked.")
     pub billing_triggered_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
-// ---------------------------------------------------------------------------
 // Shift interest / applications
-// ---------------------------------------------------------------------------
 
 /// A clinician expressing interest in an open shift.
-/// Shown as "3 Interested", "1 Interested" on the Open Shifts panel.
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct ShiftInterest {
     pub id: Uuid,
@@ -221,12 +207,9 @@ pub struct ShiftInterest {
     pub expressed_at: DateTime<Utc>,
 }
 
-// ---------------------------------------------------------------------------
 // Clock-in / clock-out record
-// ---------------------------------------------------------------------------
 
 /// Records a clinician's clock-in and clock-out for a shift.
-/// Clock-in requires GPS verification within the hospital's geofence (100m default).
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct ShiftAttendance {
     pub id: Uuid,
@@ -252,15 +235,9 @@ pub struct ShiftAttendance {
     pub updated_at: DateTime<Utc>,
 }
 
-// ---------------------------------------------------------------------------
 // Dashboard KPI snapshot
-// ---------------------------------------------------------------------------
 
 /// Pre-computed KPI snapshot for the Clinical Dashboard top cards.
-/// Recalculated periodically (e.g. hourly) and cached here.
-///   - Shift Fill Rate: 84% (goal: 92%)
-///   - Total Disbursements: ₦12.4M (+4.2% from last week)
-///   - Average Fill Time: 14.2 hrs (-2h improvement)
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct DashboardKpiSnapshot {
     pub id: Uuid,
@@ -288,13 +265,9 @@ pub struct DashboardKpiSnapshot {
     pub created_at: DateTime<Utc>,
 }
 
-// ---------------------------------------------------------------------------
 // Staffing insight
-// ---------------------------------------------------------------------------
 
 /// An AI/analytics-generated staffing insight shown in the dashboard panel.
-/// e.g. "Nurse availability is 15% higher than average on Fridays.
-///        Consider scheduling elective surgery coverage now."
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct StaffingInsight {
     pub id: Uuid,
@@ -308,13 +281,9 @@ pub struct StaffingInsight {
     pub created_at: DateTime<Utc>,
 }
 
-// ---------------------------------------------------------------------------
 // Shift allowances
-// ---------------------------------------------------------------------------
 
 /// An additional allowance added to a shift's compensation.
-/// Created via the "+ Add Additional Allowance" button in Step 2.
-/// Examples: transport allowance, hazard pay, night differential.
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct ShiftAllowance {
     pub id: Uuid,
@@ -338,9 +307,6 @@ pub struct AddAllowanceRequest {
 }
 
 /// The full compensation breakdown returned to the frontend for the summary card.
-///   Base (8 hrs × ₦8,000)  ₦64,000
-///   STAT Bonus              ₦5,000
-///   GRAND TOTAL             ₦69,000
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompensationSummary {
     pub pay_type: PayType,
@@ -356,9 +322,7 @@ pub struct CompensationSummary {
     pub base_calculation_label: String,
 }
 
-// ---------------------------------------------------------------------------
 // Shift description items (Step 3)
-// ---------------------------------------------------------------------------
 
 /// Category of a shift description line item.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
@@ -374,7 +338,6 @@ pub enum ShiftItemCategory {
 }
 
 /// A single line item in the shift description (task, deliverable, or equipment).
-/// Linked to either a published shift or a wizard draft.
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct ShiftDescriptionItem {
     pub id: Uuid,
@@ -400,14 +363,9 @@ pub struct AddDescriptionItemRequest {
     pub description: Option<String>,
 }
 
-// ---------------------------------------------------------------------------
 // Shift requirements / qualifications (Step 4)
-// ---------------------------------------------------------------------------
 
 /// A qualification tag required for a shift.
-/// Shown as pill badges in Step 4: "2+ years emergency experience",
-/// "ACLS certified", "Valid medical license".
-/// Linked to either a published shift or a wizard draft.
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct ShiftRequirement {
     pub id: Uuid,
@@ -427,12 +385,9 @@ pub struct AddRequirementRequest {
     pub qualification: String,
 }
 
-// ---------------------------------------------------------------------------
 // Shift bookmark (Step 5 — Preview card)
-// ---------------------------------------------------------------------------
 
 /// A clinician bookmarking a shift from the preview card or marketplace.
-/// Shown as the bookmark icon (🔖) in the top-right of the shift preview card.
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct ShiftBookmark {
     pub id: Uuid,
@@ -441,15 +396,9 @@ pub struct ShiftBookmark {
     pub bookmarked_at: DateTime<Utc>,
 }
 
-// ---------------------------------------------------------------------------
 // Shift broadcast record (Step 5 — Broadcast Shift action)
-// ---------------------------------------------------------------------------
 
 /// Audit record created when a hospital clicks "Broadcast Shift".
-/// Captures the exact state at broadcast time for compliance and billing.
-/// "By clicking broadcast, this position will be immediately published to
-///  the clinician marketplace. Charges will only apply once a clinician
-///  is successfully booked."
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct ShiftBroadcastRecord {
     pub id: Uuid,
@@ -466,13 +415,9 @@ pub struct ShiftBroadcastRecord {
     pub created_at: DateTime<Utc>,
 }
 
-// ---------------------------------------------------------------------------
 // Shift creation wizard draft
-// ---------------------------------------------------------------------------
 
 /// Persists partial state of the 4-step shift creation wizard so the user
-/// can navigate back and forward without losing data.
-/// Promoted to a full `Shift` record when Step 4 (Review & Publish) is submitted.
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct ShiftWizardDraft {
     pub id: Uuid,
@@ -514,7 +459,6 @@ pub struct ShiftWizardDraft {
     pub matched_professionals_count: Option<i32>,
 
     // --- Step 4: Requirements ---
-    /// Whether the hospital confirmed the institutional verification consent
     pub broadcast_consent_confirmed: bool,
     /// Matched clinician count shown at publish time ("48 matched clinicians")
     pub matched_clinicians_at_publish: Option<i32>,
@@ -523,9 +467,7 @@ pub struct ShiftWizardDraft {
     pub updated_at: DateTime<Utc>,
 }
 
-// ---------------------------------------------------------------------------
 // Shift action requests
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Deserialize, Validate, ToSchema)]
 pub struct ShiftInterestRequest {
@@ -550,9 +492,7 @@ pub struct ShiftRescheduleRequest {
     pub duration_hours: f32,
 }
 
-// ---------------------------------------------------------------------------
 // Shift applications
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type, ToSchema)]
 #[sqlx(type_name = "shift_application_status", rename_all = "snake_case")]
@@ -600,9 +540,7 @@ pub struct ShiftListQuery {
     pub page: Option<i64>,
     pub page_size: Option<i64>,
 }
-// ---------------------------------------------------------------------------
 // Request / response types
-// ---------------------------------------------------------------------------
 
 /// Payload for creating a new shift posting.
 #[derive(Debug, Clone, Serialize, Deserialize, Validate, ToSchema)]
@@ -664,7 +602,6 @@ pub struct CreateShiftRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SaveShiftDraftRequest {
     pub current_step: ShiftWizardStep,
-    // Step 1
     pub role_category: Option<RoleCategory>,
     pub role_title: Option<String>,
     pub specialty: Option<String>,
@@ -673,17 +610,14 @@ pub struct SaveShiftDraftRequest {
     pub duration_hours: Option<f32>,
     pub priority: Option<ShiftPriority>,
     pub urgency_bonus_pct: Option<i16>,
-    // Step 2
     pub pay_type: Option<PayType>,
     pub rate_kobo_per_hour: Option<i64>,
     pub fixed_rate_kobo: Option<i64>,
     pub stat_bonus_kobo: Option<i64>,
     pub shift_label: Option<String>,
-    // Step 3
     pub department: Option<String>,
     pub job_description: Option<String>,
     pub notes: Option<String>,
-    // Step 4
     pub broadcast_consent_confirmed: Option<bool>,
 }
 
@@ -719,32 +653,25 @@ pub struct OpenShiftCard {
     pub is_waitlisted: bool,
 }
 
-// ---------------------------------------------------------------------------
-// Tier 2 — Hospital selection & assignment (FRS §3.4)
-// ---------------------------------------------------------------------------
+// Hospital selection & assignment
 
 /// One row in the "Interested Workers" ranked list a hospital admin sees on
-/// the shift detail page. Score is the 0–100 weighted total from §3.4.3.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct RankedInterestedClinician {
     pub clinician_id: Uuid,
     /// Display name. Until the clinician is selected, this is "last name only"
-    /// per BR-F1-19/20 (e.g. "K. Abiola" → "Abiola").
     pub display_name: String,
     /// Distance from the hospital in km. `None` if the clinician has no
-    /// recorded location.
     pub distance_km: Option<f64>,
     pub rating: f32,
     pub rating_count: i32,
     /// Number of shifts the clinician has completed on the platform.
     pub completed_shifts: i64,
     /// Acceptance rate as a percentage (0–100). Computed from
-    /// `shift_assignments` history. `None` if the clinician has no offer history.
     pub acceptance_rate_pct: Option<f64>,
     /// Whether the clinician meets every required qualification.
-    /// Until clinician qualifications are stored, this defaults to true.
     pub quals_match: bool,
-    /// Total weighted score (0–100) per FRS §3.4.3.
+    /// Total weighted score (0–100) per .
     pub score: f64,
 }
 
@@ -763,12 +690,9 @@ pub struct ShiftOfferResponse {
     pub expires_at: DateTime<Utc>,
 }
 
-// ---------------------------------------------------------------------------
-// Tier 2.4 — Worker accept / decline (FRS §3.5)
-// ---------------------------------------------------------------------------
+// Worker accept / decline
 
-/// All 5 NDPR consent booleans from spec §3.5.3. Every one must be `true`
-/// for an accept to be allowed.
+/// All 5 NDPR consent booleans from spec . Every one must be `true`
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct NdprConsent {
     /// "I agree to comply with Nigeria Data Protection Regulation (NDPR)."
@@ -805,13 +729,9 @@ pub struct DeclineShiftRequest {
     pub reason: Option<String>,
 }
 
-// ---------------------------------------------------------------------------
-// Tier 2.5 — Clock-in (FRS §3.6)
-// ---------------------------------------------------------------------------
+// Clock-in
 
 /// Request body for `POST /api/v1/shifts/{shift_id}/clockin`.
-/// For in-person shifts (`method = "gps"`), `latitude` + `longitude` are required.
-/// For virtual shifts (`method = "virtual"`), GPS is not required (BR-F1-34).
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct ClockinRequest {
     pub method: ClockinMethod,
@@ -819,19 +739,14 @@ pub struct ClockinRequest {
     pub longitude: Option<f64>,
 }
 
-// ---------------------------------------------------------------------------
-// Tier 3.5 — GPS-fallback clock-in approval (FRS §3.6.6)
-// ---------------------------------------------------------------------------
+// GPS-fallback clock-in approval
 
 /// Request body for `POST /api/v1/shifts/{shift_id}/clockin/approval-request`.
-/// Worker submits a photo of the hospital entrance plus device GPS when their
-/// GPS fix is too imprecise to satisfy the geofence.
 #[derive(Debug, Clone, Deserialize, Validate, ToSchema)]
 pub struct ClockinApprovalRequest {
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
     /// Base64-encoded image bytes. Production should switch to a presigned
-    /// upload URL.
     #[validate(length(min = 1, max = 8_000_000))]
     pub photo_base64: String,
     /// Optional MIME type (e.g. `"image/jpeg"`).
@@ -853,7 +768,6 @@ pub struct ClockinApprovalRecord {
 }
 
 /// Request body for `POST /api/v1/clockin-approvals/{id}/deny` (notes optional
-/// on both approve and deny so we share a struct).
 #[derive(Debug, Clone, Deserialize, Validate, ToSchema)]
 pub struct ClockinApprovalDecisionRequest {
     #[validate(length(max = 1000))]
@@ -870,14 +784,11 @@ pub struct ClockinResponse {
     pub distance_meters: Option<f64>,
     /// Minutes late vs. `scheduled_start`. 0 if on time or early.
     pub late_minutes: i32,
-    /// True when the clinician is 15–30 minutes late (§3.6.7 — 25% pay
-    /// reduction for the first hour).
+    /// True when the clinician is 15–30 minutes late (— 25% pay
     pub late_penalty_applied: bool,
 }
 
-// ---------------------------------------------------------------------------
-// Tier 2.6 — Handover + clock-out (FRS §3.7)
-// ---------------------------------------------------------------------------
+// Handover + clock-out
 
 /// Request body for `POST /api/v1/shifts/{shift_id}/handover` (F1-H01..H05).
 #[derive(Debug, Clone, Deserialize, Validate, ToSchema)]
@@ -933,12 +844,9 @@ pub struct HandoverRevisionRequest {
     pub revision_notes: String,
 }
 
-// ---------------------------------------------------------------------------
-// Tier 2.7 — Mutual ratings (FRS §3.9)
-// ---------------------------------------------------------------------------
+// Mutual ratings
 
-/// Sub-scores a worker assigns when rating a hospital (§3.9.4). All four are
-/// 1–5 stars.
+/// Sub-scores a worker assigns when rating a hospital. All four are
 #[derive(Debug, Clone, Serialize, Deserialize, Validate, ToSchema)]
 pub struct HospitalRatingDimensions {
     #[validate(range(min = 1, max = 5))]
@@ -972,8 +880,6 @@ pub struct RateHospitalRequest {
 }
 
 /// Request body for `PATCH /api/v1/ratings/{rating_id}` — edit within 48h
-/// (BR-F1-50). Accepts the worker- or hospital-rating shape; fields not
-/// applicable to the rating's `ratee_kind` are ignored.
 #[derive(Debug, Clone, Deserialize, Validate, ToSchema)]
 pub struct EditRatingRequest {
     #[validate(range(min = 1, max = 5))]
@@ -984,12 +890,9 @@ pub struct EditRatingRequest {
     pub dimensions: Option<HospitalRatingDimensions>,
 }
 
-// ---------------------------------------------------------------------------
-// Tier 2.1 — Worker discovery (FRS §3.3)
-// ---------------------------------------------------------------------------
+// Worker discovery
 
 /// A shift card returned by `GET /api/v1/worker/shifts/nearby`.
-/// Sorted by (urgency rank desc, distance asc).
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct NearbyShiftCard {
     pub shift_id: Uuid,
@@ -1006,7 +909,6 @@ pub struct NearbyShiftCard {
     pub fixed_rate_kobo: Option<i64>,
     pub stat_bonus_kobo: Option<i64>,
     /// Distance from the worker in km. `None` if the worker has no recorded
-    /// location, or for virtual shifts where distance is irrelevant.
     pub distance_km: Option<f64>,
     /// Whether the caller has already expressed interest in this shift.
     pub interest_expressed: bool,

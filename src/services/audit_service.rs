@@ -15,7 +15,6 @@ pub enum AuditServiceError {
 }
 
 /// Service for logging registration events to immutable audit trail
-/// Requirements: 1.5, 4.5, 8.1, 8.2, 8.3
 pub struct AuditService {
     audit_repo: Arc<AuditRepository>,
 }
@@ -26,7 +25,6 @@ impl AuditService {
     }
 
     /// Log hospital registration event
-    /// Requirements: 1.5, 8.1, 8.2
     pub async fn log_registration(
         &self,
         hospital_id: Uuid,
@@ -50,7 +48,6 @@ impl AuditService {
     }
 
     /// Log status change event
-    /// Requirements: 4.5, 8.2, 8.3
     pub async fn log_status_change(
         &self,
         hospital_id: Uuid,
@@ -86,7 +83,6 @@ impl AuditService {
     }
 
     /// Log document upload event
-    /// Requirements: 8.1, 8.2
     pub async fn log_document_upload(
         &self,
         hospital_id: Uuid,
@@ -112,7 +108,6 @@ impl AuditService {
     }
 
     /// Log payment method addition
-    /// Requirements: 8.1, 8.2
     pub async fn log_payment_method_added(
         &self,
         hospital_id: Uuid,
@@ -138,7 +133,6 @@ impl AuditService {
     }
 
     /// Log location update
-    /// Requirements: 8.1, 8.2
     pub async fn log_location_updated(
         &self,
         hospital_id: Uuid,
@@ -166,7 +160,6 @@ impl AuditService {
     }
 
     /// Get complete audit trail for a hospital
-    /// Requirements: 8.2
     pub async fn get_audit_trail(
         &self,
         hospital_id: Uuid,
