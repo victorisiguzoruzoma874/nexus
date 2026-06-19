@@ -20,6 +20,15 @@ use nexuscare_backend::routes::create_router;
 use nexuscare_backend::services::{EmailOutboxService, NotificationService};
 
 const TEST_SECRET: &str = "test-secret-for-admin-authz";
+const TOKEN_TTL_SECS: usize = 3600;
+
+fn ensure_jwt_secret() {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        std::env::set_var("JWT_SECRET", TEST_SECRET);
+    });
+}
 
 fn mint_token(role: UserRole) -> String {
     let now = Utc::now().timestamp() as usize;
@@ -28,7 +37,7 @@ fn mint_token(role: UserRole) -> String {
         email: "admin@example.test".to_string(),
         role,
         hospital_id: None,
-        exp: now + 3600,
+        exp: now + TOKEN_TTL_SECS,
         iat: now,
     };
     encode(
@@ -48,7 +57,7 @@ fn build_app() -> axum::Router {
     let notification = Arc::new(NotificationService::new());
     let outbox_repo = Arc::new(EmailOutboxRepository::new(pool.clone()));
     let outbox = Arc::new(EmailOutboxService::new(outbox_repo, notification.clone()));
-    let (router, _state) = create_router(pool, notification, outbox);
+    let (router, _) = create_router(pool, notification, outbox);
     router
 }
 
@@ -66,13 +75,13 @@ async fn admin_hospitals_status(auth: Option<String>) -> StatusCode {
 
 #[tokio::test]
 async fn no_token_is_unauthorized() {
-    std::env::set_var("JWT_SECRET", TEST_SECRET);
+    ensure_jwt_secret();
     assert_eq!(admin_hospitals_status(None).await, StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
 async fn health_worker_is_forbidden() {
-    std::env::set_var("JWT_SECRET", TEST_SECRET);
+    ensure_jwt_secret();
     let token = mint_token(UserRole::HealthWorker);
     assert_eq!(
         admin_hospitals_status(Some(token)).await,
@@ -82,7 +91,7 @@ async fn health_worker_is_forbidden() {
 
 #[tokio::test]
 async fn hospital_admin_is_forbidden() {
-    std::env::set_var("JWT_SECRET", TEST_SECRET);
+    ensure_jwt_secret();
     let token = mint_token(UserRole::HospitalAdmin);
     assert_eq!(
         admin_hospitals_status(Some(token)).await,
@@ -92,12 +101,14 @@ async fn hospital_admin_is_forbidden() {
 
 #[tokio::test]
 async fn super_admin_passes_the_guard() {
-    std::env::set_var("JWT_SECRET", TEST_SECRET);
+    ensure_jwt_secret();
     let token = mint_token(UserRole::SuperAdmin);
     let status = admin_hospitals_status(Some(token)).await;
-    // Guard passed -> handler ran (and hit the unreachable DB -> 5xx, or
-    // succeeded if a local test DB happens to exist). Either way it is NOT
-    // blocked by authz.
-    assert_ne!(status, StatusCode::UNAUTHORIZED);
-    assert_ne!(status, StatusCode::FORBIDDEN);
+    // Guard passed -> request reached the handler. With the unreachable lazy
+    // pool this is a 5xx; if a local test DB happens to exist it is 2xx. Either
+    // way it must NOT be a client auth rejection (401/403).
+    assert!(
+        status.is_success() || status.is_server_error(),
+        "expected SuperAdmin to pass the guard and reach the handler, got {status}"
+    );
 }
