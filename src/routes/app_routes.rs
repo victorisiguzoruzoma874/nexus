@@ -18,7 +18,8 @@ use utoipa::{
 };
 use utoipa_swagger_ui::SwaggerUi;
 
-use crate::handlers::{admin, auth, earnings, health, hospitals, identity, registration, clinician_registration, shifts, wallet, webhooks};
+use crate::handlers::{auth, earnings, health, hospitals, identity, registration, clinician_registration, shifts, wallet, webhooks};
+use crate::routes::admin_routes::admin_routes;
 use crate::repositories::{
     audit::AuditRepository,
     billing::BillingRepository,
@@ -409,23 +410,8 @@ pub fn create_router(
             "/api/v1/hospitals/{hospital_id}/status",
             get(registration::get_registration_status),
         )
-        // Admin endpoints
-        .route(
-            "/api/v1/admin/hospitals/{hospital_id}/approve",
-            post(registration::approve_hospital),
-        )
-        .route(
-            "/api/v1/admin/hospitals/{hospital_id}/reject",
-            post(registration::reject_hospital),
-        )
-        .route(
-            "/api/v1/admin/hospitals",
-            get(admin::list_hospitals_admin),
-        )
-        .route(
-            "/api/v1/admin/clinicians",
-            get(admin::list_clinicians_admin),
-        )
+        // Admin surface — SuperAdmin-only, one blanket guard (see admin_routes).
+        .merge(admin_routes())
         // Existing Hospitals endpoints (legacy - for backward compatibility)
         .route("/api/v1/hospitals/create", post(hospitals::create_hospital))
         .route("/api/v1/hospitals/{id}", get(hospitals::get_hospital))
