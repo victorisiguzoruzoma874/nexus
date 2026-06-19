@@ -21,6 +21,26 @@ use nexuscare_backend::services::{EmailOutboxService, NotificationService};
 
 const TEST_SECRET: &str = "test-secret-for-admin-authz";
 const TOKEN_TTL_SECS: usize = 3600;
+const SAMPLE_ID: &str = "11111111-1111-1111-1111-111111111111";
+
+/// Every route on the SuperAdmin-only admin surface. Keeping this list in sync
+/// with `admin_routes()` is what protects the single-choke-point invariant:
+/// each one must reject a missing token (401) and any non-SuperAdmin role (403).
+fn admin_routes_table() -> Vec<(&'static str, String)> {
+    vec![
+        ("GET", "/api/v1/admin/hospitals".to_string()),
+        ("GET", "/api/v1/admin/clinicians".to_string()),
+        (
+            "POST",
+            format!("/api/v1/admin/hospitals/{SAMPLE_ID}/approve"),
+        ),
+        (
+            "POST",
+            format!("/api/v1/admin/hospitals/{SAMPLE_ID}/reject"),
+        ),
+        ("POST", format!("/api/v1/admin/payouts/{SAMPLE_ID}/retry")),
+    ]
+}
 
 fn ensure_jwt_secret() {
     use std::sync::Once;
@@ -33,7 +53,7 @@ fn ensure_jwt_secret() {
 fn mint_token(role: UserRole) -> String {
     let now = Utc::now().timestamp() as usize;
     let claims = Claims {
-        sub: "11111111-1111-1111-1111-111111111111".to_string(),
+        sub: SAMPLE_ID.to_string(),
         email: "admin@example.test".to_string(),
         role,
         hospital_id: None,
@@ -61,11 +81,9 @@ fn build_app() -> axum::Router {
     router
 }
 
-async fn admin_hospitals_status(auth: Option<String>) -> StatusCode {
+async fn route_status(method: &str, path: &str, auth: Option<String>) -> StatusCode {
     let app = build_app();
-    let mut builder = Request::builder()
-        .method("GET")
-        .uri("/api/v1/admin/hospitals");
+    let mut builder = Request::builder().method(method).uri(path);
     if let Some(token) = auth {
         builder = builder.header("Authorization", format!("Bearer {token}"));
     }
@@ -74,39 +92,40 @@ async fn admin_hospitals_status(auth: Option<String>) -> StatusCode {
 }
 
 #[tokio::test]
-async fn no_token_is_unauthorized() {
+async fn every_admin_route_requires_a_token() {
     ensure_jwt_secret();
-    assert_eq!(admin_hospitals_status(None).await, StatusCode::UNAUTHORIZED);
+    for (method, path) in admin_routes_table() {
+        assert_eq!(
+            route_status(method, &path, None).await,
+            StatusCode::UNAUTHORIZED,
+            "{method} {path} must reject a missing token with 401"
+        );
+    }
 }
 
 #[tokio::test]
-async fn health_worker_is_forbidden() {
+async fn every_admin_route_forbids_non_super_admin_roles() {
     ensure_jwt_secret();
-    let token = mint_token(UserRole::HealthWorker);
-    assert_eq!(
-        admin_hospitals_status(Some(token)).await,
-        StatusCode::FORBIDDEN
-    );
-}
-
-#[tokio::test]
-async fn hospital_admin_is_forbidden() {
-    ensure_jwt_secret();
-    let token = mint_token(UserRole::HospitalAdmin);
-    assert_eq!(
-        admin_hospitals_status(Some(token)).await,
-        StatusCode::FORBIDDEN
-    );
+    for role in [UserRole::HospitalAdmin, UserRole::HealthWorker] {
+        for (method, path) in admin_routes_table() {
+            let token = mint_token(role.clone());
+            assert_eq!(
+                route_status(method, &path, Some(token)).await,
+                StatusCode::FORBIDDEN,
+                "{method} {path} must reject {role:?} with 403"
+            );
+        }
+    }
 }
 
 #[tokio::test]
 async fn super_admin_passes_the_guard() {
     ensure_jwt_secret();
     let token = mint_token(UserRole::SuperAdmin);
-    let status = admin_hospitals_status(Some(token)).await;
-    // Guard passed -> request reached the handler. With the unreachable lazy
-    // pool this is a 5xx; if a local test DB happens to exist it is 2xx. Either
+    // Use a read route so a passing guard reaches the handler (then the
+    // unreachable lazy pool -> 5xx, or 2xx if a local test DB exists). Either
     // way it must NOT be a client auth rejection (401/403).
+    let status = route_status("GET", "/api/v1/admin/hospitals", Some(token)).await;
     assert!(
         status.is_success() || status.is_server_error(),
         "expected SuperAdmin to pass the guard and reach the handler, got {status}"
