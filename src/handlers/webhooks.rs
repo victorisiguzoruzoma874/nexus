@@ -56,11 +56,13 @@ pub async fn safehaven_webhook(
     body: Bytes,
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
     // 1. Signature verification — skipped only when the secret is empty.
-    let secret = std::env::var("SAFEHAVEN_WEBHOOK_SECRET").unwrap_or_default(); if !secret.is_empty() {
+    let secret = std::env::var("SAFEHAVEN_WEBHOOK_SECRET").unwrap_or_default();
+    if !secret.is_empty() {
         let sig = headers
             .get(SIGNATURE_HEADER)
-            .and_then(|v| v.to_str(). ok())
-            .unwrap_or_default(); if sig.is_empty() || !signature_matches(&body, secret.as_bytes(), sig) {
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default();
+        if sig.is_empty() || !signature_matches(&body, secret.as_bytes(), sig) {
             tracing::warn!("SafeHaven webhook rejected: invalid signature");
             return Err((StatusCode::UNAUTHORIZED, "invalid signature"));
         }

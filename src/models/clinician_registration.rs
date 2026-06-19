@@ -1,8 +1,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
-use uuid::Uuid;
 use utoipa::ToSchema;
+use uuid::Uuid;
 use validator::Validate;
 
 // Enums
@@ -58,8 +58,9 @@ pub struct SendOtpRequest {
 pub struct VerifyOtpRequest {
     #[validate(email(message = "A valid email address is required"))]
     pub email: String,
+    /// 6-digit email OTP (named `code` to match the login/registration OTP flows).
     #[validate(length(equal = 6, message = "OTP must be 6 digits"))]
-    pub otp: String,
+    pub code: String,
 }
 
 /// Complete clinician profile

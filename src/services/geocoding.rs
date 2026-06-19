@@ -9,16 +9,16 @@ use crate::utils::validation::validate_coordinates;
 pub enum GeocodingError {
     #[error("Failed to geocode address: {0}")]
     GeocodingFailed(String),
-    
+
     #[error("Invalid address: {0}")]
     InvalidAddress(String),
-    
+
     #[error("Invalid coordinates: {0}")]
     InvalidCoordinates(String),
-    
+
     #[error("HTTP request failed: {0}")]
     RequestFailed(#[from] reqwest::Error),
-    
+
     #[error("Service unavailable, retries exhausted")]
     ServiceUnavailable,
 }
@@ -47,9 +47,7 @@ impl GeocodingClient {
 
         Self {
             client,
-            base_url: base_url.unwrap_or_else(|| {
-                "https://nominatim.openstreetmap.org".to_string()
-            }),
+            base_url: base_url.unwrap_or_else(|| "https://nominatim.openstreetmap.org".to_string()),
             max_retries: 3,
         }
     }
@@ -60,9 +58,10 @@ impl GeocodingClient {
         let address_string = self.format_address(address);
 
         // Validate address is not empty
-        if address_string.trim(). is_empty() {
+        if address_string.trim().is_empty() {
             return Err(GeocodingError::InvalidAddress(
-                "Address cannot be empty".to_string(), ));
+                "Address cannot be empty".to_string(),
+            ));
         }
 
         // Attempt geocoding with retries
@@ -92,58 +91,56 @@ impl GeocodingClient {
     /// Format address for geocoding API
     fn format_address(&self, address: &Address) -> String {
         let mut parts = vec![address.line1.clone()];
-        
+
         if let Some(line2) = &address.line2 {
             if !line2.is_empty() {
                 parts.push(line2.clone());
             }
         }
-        
+
         parts.push(address.city.clone());
         parts.push(address.state.clone());
         parts.push(address.postal_code.clone());
         parts.push(address.country.clone());
-        
+
         parts.join(", ")
     }
 
     /// Call the geocoding service
     async fn geocode_with_service(&self, address: &str) -> Result<Coordinates, GeocodingError> {
         let url = format!("{}/search", self.base_url);
-        
+
         let response = self
             .client
             .get(&url)
-            .query(&[
-                ("q", address),
-                ("format", "json"),
-                ("limit", "1"),
-            ])
+            .query(&[("q", address), ("format", "json"), ("limit", "1")])
             .header("User-Agent", "NexusCare-Backend/1.0")
             .send()
             .await?;
 
-        if !response.status(). is_success() {
+        if !response.status().is_success() {
             return Err(GeocodingError::GeocodingFailed(format!(
                 "HTTP {}: {}",
-                response.status(), response.text(). await.unwrap_or_default()
+                response.status(),
+                response.text().await.unwrap_or_default()
             )));
         }
 
-        let results: Vec<GeocodingResponse> = response.json(). await?;
+        let results: Vec<GeocodingResponse> = response.json().await?;
 
         if results.is_empty() {
             return Err(GeocodingError::InvalidAddress(
-                "Address not found".to_string(), ));
+                "Address not found".to_string(),
+            ));
         }
 
         let result = &results[0];
-        
+
         // Parse coordinates
         let latitude = result.lat.parse::<f64>().map_err(|_| {
             GeocodingError::GeocodingFailed("Invalid latitude in response".to_string())
         })?;
-        
+
         let longitude = result.lon.parse::<f64>().map_err(|_| {
             GeocodingError::GeocodingFailed("Invalid longitude in response".to_string())
         })?;
@@ -174,10 +171,15 @@ mod tests {
     #[test]
     fn test_format_address() {
         let client = GeocodingClient::new(None);
-        
+
         let address = Address {
-            line1: "123 Main Street".to_string(), line2: Some("Suite 100".to_string()),
-            city: "Lagos".to_string(), state: "Lagos State".to_string(), postal_code: "100001".to_string(), country: "Nigeria".to_string(), };
+            line1: "123 Main Street".to_string(),
+            line2: Some("Suite 100".to_string()),
+            city: "Lagos".to_string(),
+            state: "Lagos State".to_string(),
+            postal_code: "100001".to_string(),
+            country: "Nigeria".to_string(),
+        };
 
         let formatted = client.format_address(&address);
         assert!(formatted.contains("123 Main Street"));
@@ -212,14 +214,13 @@ mod tests {
     }
 }
 
-
 #[cfg(test)]
 mod property_tests {
     use super::*;
     use proptest::prelude::*;
 
     // Property 5: Address geocoding returns valid coordinates
-    
+
     proptest! {
         #[test]
         fn property_9_coordinate_validation(
@@ -264,13 +265,18 @@ mod property_tests {
     #[test]
     fn test_property_8_invalid_address_handling() {
         let client = GeocodingClient::new(None);
-        
+
         // Empty address
         let empty_address = Address {
-            line1: "".to_string(), line2: None,
-            city: "".to_string(), state: "".to_string(), postal_code: "".to_string(), country: "".to_string(), };
+            line1: "".to_string(),
+            line2: None,
+            city: "".to_string(),
+            state: "".to_string(),
+            postal_code: "".to_string(),
+            country: "".to_string(),
+        };
 
         let formatted = client.format_address(&empty_address);
-        assert!(formatted.trim(). is_empty() || formatted == ", , , , ");
+        assert!(formatted.trim().is_empty() || formatted == ", , , , ");
     }
 }

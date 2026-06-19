@@ -4,15 +4,14 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use utoipa::ToSchema;
+use uuid::Uuid;
 
 use crate::models::admin_registration::HospitalRegistrationRequest;
 use crate::models::user::Claims;
 use crate::routes::AppState;
 use crate::services::registration_service::{
-    RegistrationError, RegistrationStatusResponse,
-    HospitalListResponse,
+    HospitalListResponse, RegistrationError, RegistrationStatusResponse,
 };
 use crate::utils::extract_claims;
 
@@ -72,7 +71,11 @@ pub async fn register_hospital(
     Json(request): Json<HospitalRegistrationRequest>,
 ) -> Result<(StatusCode, Json<HospitalRegistrationResponse>), (StatusCode, Json<ErrorResponse>)> {
     let user_id = Uuid::new_v4();
-    match state.registration_service.register_hospital(user_id, request).await {
+    match state
+        .registration_service
+        .register_hospital(user_id, request)
+        .await
+    {
         Ok(result) => Ok((
             StatusCode::CREATED,
             Json(HospitalRegistrationResponse {
@@ -84,10 +87,16 @@ pub async fn register_hospital(
         )),
         Err(e) => {
             let (status, code) = match e {
-                RegistrationError::ValidationError(_) => (StatusCode::BAD_REQUEST, "VALIDATION_ERROR"),
-                RegistrationError::DuplicateRegistration(_) => (StatusCode::CONFLICT, "DUPLICATE_REGISTRATION"),
+                RegistrationError::ValidationError(_) => {
+                    (StatusCode::BAD_REQUEST, "VALIDATION_ERROR")
+                }
+                RegistrationError::DuplicateRegistration(_) => {
+                    (StatusCode::CONFLICT, "DUPLICATE_REGISTRATION")
+                }
                 RegistrationError::NotFound(_) => (StatusCode::NOT_FOUND, "NOT_FOUND"),
-                RegistrationError::InvalidStatusTransition(_, _) => (StatusCode::CONFLICT, "INVALID_STATUS_TRANSITION"),
+                RegistrationError::InvalidStatusTransition(_, _) => {
+                    (StatusCode::CONFLICT, "INVALID_STATUS_TRANSITION")
+                }
                 RegistrationError::LocationError(_) => {
                     (StatusCode::SERVICE_UNAVAILABLE, "EXTERNAL_SERVICE_ERROR")
                 }
@@ -100,7 +109,9 @@ pub async fn register_hospital(
             Err((
                 status,
                 Json(ErrorResponse {
-                    code: code.to_string(), message: e.to_string(), }),
+                    code: code.to_string(),
+                    message: e.to_string(),
+                }),
             ))
         }
     }
@@ -123,7 +134,11 @@ pub async fn get_registration_status(
     State(state): State<AppState>,
     Path(hospital_id): Path<Uuid>,
 ) -> Result<Json<RegistrationStatusResponse>, (StatusCode, Json<ErrorResponse>)> {
-    match state.registration_service.get_registration_status(hospital_id).await {
+    match state
+        .registration_service
+        .get_registration_status(hospital_id)
+        .await
+    {
         Ok(status) => Ok(Json(status)),
         Err(e) => {
             let status_code = match e {
@@ -134,7 +149,9 @@ pub async fn get_registration_status(
             Err((
                 status_code,
                 Json(ErrorResponse {
-                    code: "ERROR".to_string(), message: e.to_string(), }),
+                    code: "ERROR".to_string(),
+                    message: e.to_string(),
+                }),
             ))
         }
     }
@@ -181,10 +198,16 @@ pub async fn approve_hospital(
     })?;
     let admin_id = admin_id_from_claims(&claims);
 
-    match state.registration_service.approve_hospital(hospital_id, admin_id, request.notes).await {
+    match state
+        .registration_service
+        .approve_hospital(hospital_id, admin_id, request.notes)
+        .await
+    {
         Ok(_) => Ok(Json(StatusChangeResponse {
-            message: "Hospital approved successfully".to_string(), hospital_id,
-            new_status: "Approved".to_string(), })),
+            message: "Hospital approved successfully".to_string(),
+            hospital_id,
+            new_status: "Approved".to_string(),
+        })),
         Err(e) => {
             let (status_code, code) = match e {
                 RegistrationError::NotFound(_) => (StatusCode::NOT_FOUND, "NOT_FOUND"),
@@ -200,7 +223,9 @@ pub async fn approve_hospital(
             Err((
                 status_code,
                 Json(ErrorResponse {
-                    code: code.to_string(), message: e.to_string(), }),
+                    code: code.to_string(),
+                    message: e.to_string(),
+                }),
             ))
         }
     }
@@ -242,10 +267,16 @@ pub async fn reject_hospital(
     })?;
     let admin_id = admin_id_from_claims(&claims);
 
-    match state.registration_service.reject_hospital(hospital_id, admin_id, request.reason).await {
+    match state
+        .registration_service
+        .reject_hospital(hospital_id, admin_id, request.reason)
+        .await
+    {
         Ok(_) => Ok(Json(StatusChangeResponse {
-            message: "Hospital rejected successfully".to_string(), hospital_id,
-            new_status: "Rejected".to_string(), })),
+            message: "Hospital rejected successfully".to_string(),
+            hospital_id,
+            new_status: "Rejected".to_string(),
+        })),
         Err(e) => {
             let status_code = match e {
                 RegistrationError::ValidationError(_) => StatusCode::BAD_REQUEST,
@@ -257,7 +288,9 @@ pub async fn reject_hospital(
             Err((
                 status_code,
                 Json(ErrorResponse {
-                    code: "ERROR".to_string(), message: e.to_string(), }),
+                    code: "ERROR".to_string(),
+                    message: e.to_string(),
+                }),
             ))
         }
     }
@@ -283,9 +316,9 @@ pub async fn list_hospitals(
     axum::extract::Query(params): axum::extract::Query<ListHospitalsQuery>,
 ) -> Result<Json<HospitalListResponse>, (StatusCode, Json<ErrorResponse>)> {
     use crate::models::registration::RegistrationStatus;
-    
+
     let status_filter = if let Some(status_str) = params.status {
-        match status_str.to_lowercase(). as_str() {
+        match status_str.to_lowercase().as_str() {
             "pending" => Some(RegistrationStatus::Pending),
             "approved" => Some(RegistrationStatus::Approved),
             "rejected" => Some(RegistrationStatus::Rejected),
@@ -293,7 +326,9 @@ pub async fn list_hospitals(
                 return Err((
                     StatusCode::BAD_REQUEST,
                     Json(ErrorResponse {
-                        code: "INVALID_STATUS".to_string(), message: "Status must be one of: pending, approved, rejected".to_string(), }),
+                        code: "INVALID_STATUS".to_string(),
+                        message: "Status must be one of: pending, approved, rejected".to_string(),
+                    }),
                 ));
             }
         }
@@ -304,15 +339,19 @@ pub async fn list_hospitals(
     let page = params.page.unwrap_or(1);
     let page_size = params.page_size.unwrap_or(20);
 
-    match state.registration_service.list_hospitals(status_filter, page, page_size).await {
+    match state
+        .registration_service
+        .list_hospitals(status_filter, page, page_size)
+        .await
+    {
         Ok(response) => Ok(Json(response)),
-        Err(e) => {
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    code: "ERROR".to_string(), message: e.to_string(), }),
-            ))
-        }
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                code: "ERROR".to_string(),
+                message: e.to_string(),
+            }),
+        )),
     }
 }
 

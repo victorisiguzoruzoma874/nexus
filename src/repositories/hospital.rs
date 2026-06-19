@@ -9,10 +9,10 @@ use crate::models::registration::RegistrationStatus;
 pub enum RepositoryError {
     #[error("Database error: {0}")]
     DatabaseError(#[from] sqlx::Error),
-    
+
     #[error("Hospital not found: {0}")]
     NotFound(Uuid),
-    
+
     #[error("Duplicate email: {0}")]
     DuplicateEmail(String),
 }
@@ -260,7 +260,6 @@ mod tests {
     // Unit tests will be added here
 }
 
-
 // Note: Full integration tests with database will be in Task 10.5
 #[cfg(test)]
 mod property_tests {
@@ -268,7 +267,7 @@ mod property_tests {
     use proptest::prelude::*;
 
     // Property 3: Unique hospital identifiers
-    
+
     #[test]
     fn test_duplicate_email_detection() {
         // This will be tested in integration tests with actual database

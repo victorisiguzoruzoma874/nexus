@@ -1,9 +1,9 @@
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use utoipa::ToSchema;
 use uuid::Uuid;
 use validator::Validate;
-use utoipa::ToSchema;
 
 // Registration Status Enum (for hospital admin registration workflow)
 

@@ -9,16 +9,16 @@ use bcrypt::{hash, verify};
 pub enum EncryptionError {
     #[error("Encryption failed: {0}")]
     EncryptionFailed(String),
-    
+
     #[error("Decryption failed: {0}")]
     DecryptionFailed(String),
-    
+
     #[error("Password hashing failed: {0}")]
     HashingFailed(String),
-    
+
     #[error("Password verification failed")]
     VerificationFailed,
-    
+
     #[error("Invalid key: {0}")]
     InvalidKey(String),
 }
@@ -34,7 +34,8 @@ impl EncryptionService {
     pub fn new(encryption_key: Vec<u8>) -> Result<Self, EncryptionError> {
         if encryption_key.len() != 32 {
             return Err(EncryptionError::InvalidKey(
-                "Encryption key must be exactly 32 bytes for AES-256".to_string(), ));
+                "Encryption key must be exactly 32 bytes for AES-256".to_string(),
+            ));
         }
 
         Ok(Self {
@@ -48,7 +49,7 @@ impl EncryptionService {
         let key = general_purpose::STANDARD
             .decode(base64_key)
             .map_err(|e| EncryptionError::InvalidKey(format!("Invalid base64: {}", e)))?;
-        
+
         Self::new(key)
     }
 
@@ -78,8 +79,9 @@ impl EncryptionService {
             .map_err(|e| EncryptionError::EncryptionFailed(format!("Encryption error: {}", e)))?;
 
         // Prepend nonce to ciphertext and encode as base64
-        let mut result = nonce_bytes.to_vec(); result.extend_from_slice(&ciphertext);
-        
+        let mut result = nonce_bytes.to_vec();
+        result.extend_from_slice(&ciphertext);
+
         Ok(general_purpose::STANDARD.encode(result))
     }
 
@@ -93,7 +95,8 @@ impl EncryptionService {
         // Extract nonce (first 12 bytes) and ciphertext
         if encrypted_data.len() < 12 {
             return Err(EncryptionError::DecryptionFailed(
-                "Encrypted data too short".to_string(), ));
+                "Encrypted data too short".to_string(),
+            ));
         }
 
         let (nonce_bytes, ciphertext) = encrypted_data.split_at(12);
@@ -132,7 +135,8 @@ impl EncryptionService {
     pub fn set_bcrypt_cost(&mut self, cost: u32) -> Result<(), EncryptionError> {
         if cost < 12 {
             return Err(EncryptionError::HashingFailed(
-                "Bcrypt cost must be at least 12 per security requirements".to_string(), ));
+                "Bcrypt cost must be at least 12 per security requirements".to_string(),
+            ));
         }
         self.bcrypt_cost = cost;
         Ok(())
@@ -249,7 +253,6 @@ mod tests {
     }
 }
 
-
 #[cfg(test)]
 mod property_tests {
     use super::*;
@@ -266,7 +269,7 @@ mod property_tests {
             let encrypted = service.encrypt_token(&token).unwrap(); // Property: Encrypted token should not contain plaintext
             prop_assert!(!encrypted.contains(&token),
                 "Encrypted token should not contain plaintext");
-            
+
             // Property: Encrypted token should be different from plaintext
             prop_assert_ne!(&encrypted, &token,
                 "Encrypted token should differ from plaintext");

@@ -9,7 +9,7 @@ use crate::repositories::audit::{AuditError, AuditRepository};
 pub enum AuditServiceError {
     #[error("Audit logging failed: {0}")]
     LoggingFailed(#[from] AuditError),
-    
+
     #[error("Serialization failed: {0}")]
     SerializationFailed(#[from] serde_json::Error),
 }
@@ -58,12 +58,12 @@ impl AuditService {
     ) -> Result<AuditEntry, AuditServiceError> {
         let old_value = serde_json::to_value(&old_status)?;
         let new_value = serde_json::to_value(&new_status)?;
-        
+
         let mut metadata = serde_json::json!({
             "old_status": old_status,
             "new_status": new_status,
         });
-        
+
         if let Some(reason) = reason {
             metadata["reason"] = serde_json::Value::String(reason);
         }
@@ -165,7 +165,10 @@ impl AuditService {
         hospital_id: Uuid,
         limit: i64,
     ) -> Result<Vec<AuditEntry>, AuditServiceError> {
-        let entries = self.audit_repo.find_by_hospital_id(hospital_id, limit).await?;
+        let entries = self
+            .audit_repo
+            .find_by_hospital_id(hospital_id, limit)
+            .await?;
         Ok(entries)
     }
 }

@@ -55,11 +55,19 @@ pub struct SetHospitalLocationRequest {
     pub place_label: Option<String>,
 
     /// Defaults to 100 if not provided
-    #[validate(range(min = 50, max = 5000, message = "Clock-in radius must be between 50m and 5000m"))]
+    #[validate(range(
+        min = 50,
+        max = 5000,
+        message = "Clock-in radius must be between 50m and 5000m"
+    ))]
     pub clock_in_radius_meters: Option<i32>,
 
     /// Defaults to 5.0 if not provided
-    #[validate(range(min = 1.0, max = 100.0, message = "Broadcast radius must be between 1km and 100km"))]
+    #[validate(range(
+        min = 1.0,
+        max = 100.0,
+        message = "Broadcast radius must be between 1km and 100km"
+    ))]
     pub shift_broadcast_radius_km: Option<f64>,
 }
 

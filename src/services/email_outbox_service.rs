@@ -3,8 +3,8 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::repositories::email_outbox::EmailOutboxRepository;
-use crate::services::notification_service::{NotificationError, NotificationService};
 use crate::services::email_templates::EmailContent;
+use crate::services::notification_service::{NotificationError, NotificationService};
 
 #[derive(Debug, thiserror::Error)]
 pub enum EmailOutboxError {
@@ -20,10 +20,7 @@ pub struct EmailOutboxService {
 }
 
 impl EmailOutboxService {
-    pub fn new(
-        repo: Arc<EmailOutboxRepository>,
-        notification: Arc<NotificationService>,
-    ) -> Self {
+    pub fn new(repo: Arc<EmailOutboxRepository>, notification: Arc<NotificationService>) -> Self {
         Self { repo, notification }
     }
 
@@ -54,11 +51,15 @@ impl EmailOutboxService {
 
         for item in pending {
             let attempts = self.repo.mark_processing(item.id).await?;
-            let send_result = self.notification.send_email_message(
-                &item.to_email,
-                &item.subject,
-                &item.text_body,
-                item.html_body.as_deref(), ).await;
+            let send_result = self
+                .notification
+                .send_email_message(
+                    &item.to_email,
+                    &item.subject,
+                    &item.text_body,
+                    item.html_body.as_deref(),
+                )
+                .await;
 
             match send_result {
                 Ok(()) => {
@@ -71,7 +72,9 @@ impl EmailOutboxService {
                     } else {
                         let delay_minutes = retry_base_minutes * attempts as i64;
                         let retry_at = Utc::now() + Duration::minutes(delay_minutes);
-                        self.repo.reschedule(item.id, &err.to_string(), retry_at).await?;
+                        self.repo
+                            .reschedule(item.id, &err.to_string(), retry_at)
+                            .await?;
                     }
                 }
             }
@@ -93,22 +96,22 @@ impl EmailOutboxWorker {
     pub fn new(service: Arc<EmailOutboxService>) -> Self {
         let batch_size = std::env::var("EMAIL_OUTBOX_BATCH_SIZE")
             .ok()
-            .and_then(|v| v.parse(). ok())
+            .and_then(|v| v.parse().ok())
             .unwrap_or(20);
 
         let max_attempts = std::env::var("EMAIL_OUTBOX_MAX_ATTEMPTS")
             .ok()
-            .and_then(|v| v.parse(). ok())
+            .and_then(|v| v.parse().ok())
             .unwrap_or(5);
 
         let retry_base_minutes = std::env::var("EMAIL_OUTBOX_RETRY_BASE_MINUTES")
             .ok()
-            .and_then(|v| v.parse(). ok())
+            .and_then(|v| v.parse().ok())
             .unwrap_or(5);
 
         let poll_secs = std::env::var("EMAIL_OUTBOX_POLL_SECS")
             .ok()
-            .and_then(|v| v.parse(). ok())
+            .and_then(|v| v.parse().ok())
             .unwrap_or(5);
 
         Self {
@@ -123,7 +126,7 @@ impl EmailOutboxWorker {
     pub async fn run(self) {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(self.poll_secs));
         loop {
-            interval.tick(). await;
+            interval.tick().await;
             match self
                 .service
                 .process_pending_batch(self.batch_size, self.max_attempts, self.retry_base_minutes)

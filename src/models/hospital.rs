@@ -65,19 +65,35 @@ pub struct Hospital {
 /// Payload for Step 1 (Setup) of hospital registration.
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct CreateHospitalRequest {
-    #[validate(length(min = 2, max = 255, message = "Hospital name must be between 2 and 255 characters"))]
+    #[validate(length(
+        min = 2,
+        max = 255,
+        message = "Hospital name must be between 2 and 255 characters"
+    ))]
     pub name: String,
 
-    #[validate(length(min = 3, max = 50, message = "Registration number must be between 3 and 50 characters"))]
+    #[validate(length(
+        min = 3,
+        max = 50,
+        message = "Registration number must be between 3 and 50 characters"
+    ))]
     pub registration_number: String,
 
     #[validate(email(message = "A valid email address is required"))]
     pub email: String,
 
-    #[validate(length(min = 5, max = 500, message = "Address must be between 5 and 500 characters"))]
+    #[validate(length(
+        min = 5,
+        max = 500,
+        message = "Address must be between 5 and 500 characters"
+    ))]
     pub address: String,
 
-    #[validate(length(min = 7, max = 20, message = "Phone number must be between 7 and 20 characters"))]
+    #[validate(length(
+        min = 7,
+        max = 20,
+        message = "Phone number must be between 7 and 20 characters"
+    ))]
     pub phone_number: String,
 }
 

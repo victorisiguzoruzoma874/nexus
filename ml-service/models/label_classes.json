@@ -1,0 +1,73 @@
+{
+  "blood_group": [
+    "A+",
+    "A-",
+    "AB+",
+    "AB-",
+    "B+",
+    "B-",
+    "O+",
+    "O-"
+  ],
+  "genotype": [
+    "AA",
+    "AC",
+    "AS",
+    "SS"
+  ],
+  "gender": [
+    "Female",
+    "Male"
+  ],
+  "disease_type": [
+    "Chronic",
+    "Genetic",
+    "Infectious",
+    "MentalHealth"
+  ],
+  "severity_level": [
+    "Critical",
+    "Mild",
+    "Moderate",
+    "Severe"
+  ],
+  "weather_condition": [
+    "Cold",
+    "Dry",
+    "Hot",
+    "Humid",
+    "Rainy"
+  ],
+  "patient_category": [
+    "Adult",
+    "Child",
+    "Elderly",
+    "Teenager"
+  ],
+  "exercise_habits": [
+    "Daily",
+    "Unknown",
+    "Weekly"
+  ],
+  "diet_type": [
+    "Mixed",
+    "Pescatarian",
+    "Vegan",
+    "Vegetarian"
+  ],
+  "water_source": [
+    "Borehole",
+    "Bottled",
+    "River",
+    "Tap"
+  ],
+  "mortality_risk": [
+    "High",
+    "Low",
+    "Medium"
+  ],
+  "readmission_prediction": [
+    "High",
+    "Low"
+  ]
+}

@@ -108,6 +108,8 @@ impl From<&Wallet> for WalletSummary {
             balance_kobo: w.balance_kobo,
             held_kobo: w.held_kobo,
             total_kobo: w.balance_kobo + w.held_kobo,
-            safehaven_account_number: w.safehaven_account_number.clone(), safehaven_bank_code: w.safehaven_bank_code.clone(), }
+            safehaven_account_number: w.safehaven_account_number.clone(),
+            safehaven_bank_code: w.safehaven_bank_code.clone(),
+        }
     }
 }

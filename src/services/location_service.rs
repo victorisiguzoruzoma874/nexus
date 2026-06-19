@@ -10,10 +10,10 @@ use crate::services::geocoding::{GeocodingClient, GeocodingError};
 pub enum LocationServiceError {
     #[error("Geocoding failed: {0}")]
     GeocodingFailed(#[from] GeocodingError),
-    
+
     #[error("Location storage failed: {0}")]
     StorageFailed(#[from] LocationError),
-    
+
     #[error("Invalid service radius: {0}")]
     InvalidServiceRadius(String),
 }
@@ -52,7 +52,7 @@ impl LocationService {
                     format!("{}, {}, {}", address.line1, address.city, address.country),
                     e
                 );
-                
+
                 // Use default coordinates (Lagos, Nigeria) for development
                 Coordinates {
                     latitude: 6.5244,
@@ -94,9 +94,10 @@ impl LocationService {
         radius_km: f64,
     ) -> Result<ServiceArea, LocationServiceError> {
         if radius_km <= 0.0 || radius_km > 100.0 {
-            return Err(LocationServiceError::InvalidServiceRadius(
-                format!("Radius must be between 0 and 100km, got {}", radius_km),
-            ));
+            return Err(LocationServiceError::InvalidServiceRadius(format!(
+                "Radius must be between 0 and 100km, got {}",
+                radius_km
+            )));
         }
 
         Ok(ServiceArea {
@@ -146,7 +147,8 @@ mod tests {
         let location_repo = Arc::new(LocationRepository::new(
             sqlx::PgPool::connect("postgresql://localhost/test")
                 .await
-                .unwrap(), ));
+                .unwrap(),
+        ));
         let service = LocationService::new(geocoding_client, location_repo);
 
         // Valid coordinates
@@ -177,7 +179,8 @@ mod tests {
         let location_repo = Arc::new(LocationRepository::new(
             sqlx::PgPool::connect("postgresql://localhost/test")
                 .await
-                .unwrap(), ));
+                .unwrap(),
+        ));
         let service = LocationService::new(geocoding_client, location_repo);
 
         let coords = Coordinates {
@@ -188,10 +191,12 @@ mod tests {
         // Valid radius
         let result = service.calculate_service_radius(coords.clone(), 5.0);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(). radius_km, 5.0);
+        assert_eq!(result.unwrap().radius_km, 5.0);
 
         // Invalid radius (too small)
-        assert!(service.calculate_service_radius(coords.clone(), 0.0).is_err());
+        assert!(service
+            .calculate_service_radius(coords.clone(), 0.0)
+            .is_err());
 
         // Invalid radius (too large)
         assert!(service.calculate_service_radius(coords, 101.0).is_err());

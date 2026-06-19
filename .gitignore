@@ -3,3 +3,14 @@
 *.pdb
 .kiro
 .md
+
+# Python
+ml-service/.venv/
+ml-service/__pycache__/
+ml-service/**/__pycache__/
+*.pyc
+*.pyo
+
+# ML artifacts — trained models and exports (generated, not source)
+ml-service/models/*.pkl
+ml-service/data/patients_export.csv

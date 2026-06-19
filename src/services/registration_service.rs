@@ -1,50 +1,50 @@
-use std::sync::Arc;
 use chrono::Utc;
-use sqlx::PgPool;
-use uuid::Uuid;
 use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
+use std::sync::Arc;
 use utoipa::ToSchema;
+use uuid::Uuid;
 
 use crate::models::admin_registration::{HospitalRegistrationRequest, NewHospital};
 use crate::models::hospital::Hospital;
 use crate::models::registration::RegistrationStatus;
 use crate::repositories::hospital::{HospitalRepository, RepositoryError};
 use crate::services::audit_service::{AuditService, AuditServiceError, RegistrationDetails};
-use crate::services::location_service::{LocationService, LocationServiceError};
 use crate::services::email_outbox_service::EmailOutboxService;
 use crate::services::email_templates;
-use crate::services::wallet_service::WalletService;
 use crate::services::identity_verification_service::{
-    IdentityKind, IdentityOwner, IdentityVerificationService,
+    IdentityOwner, IdentityVerificationService,
 };
+use crate::services::location_service::{LocationService, LocationServiceError};
+use crate::services::wallet_service::WalletService;
 use crate::utils::validation::{validate_email_rfc5322, validate_phone_e164};
 
 #[derive(Debug, thiserror::Error)]
 pub enum RegistrationError {
     #[error("Validation failed: {0}")]
     ValidationError(String),
-    
+
     #[error("Duplicate registration for email: {0}")]
     DuplicateRegistration(String),
-    
+
     #[error("Hospital not found: {0}")]
     NotFound(Uuid),
-    
+
     #[error("Invalid status transition from {0:?} to {1:?}")]
     InvalidStatusTransition(RegistrationStatus, RegistrationStatus),
-    
+
     #[error("Location service error: {0}")]
     LocationError(#[from] LocationServiceError),
 
     #[error("Repository error: {0}")]
     RepositoryError(#[from] RepositoryError),
-    
+
     #[error("Database error: {0}")]
     DatabaseError(#[from] sqlx::Error),
-    
+
     #[error("Audit service error: {0}")]
     AuditError(#[from] AuditServiceError),
-    
+
     #[error("External service error: {0}")]
     ExternalServiceError(String),
 
@@ -96,7 +96,7 @@ impl RegistrationService {
     /// Register a new hospital with complete workflow
     pub async fn register_hospital(
         &self,
-        user_id: Uuid,
+        _user_id: Uuid,
         request: HospitalRegistrationRequest,
     ) -> Result<HospitalRegistrationResult, RegistrationError> {
         // Normalise the email so capitalisation differences can't smuggle
@@ -111,13 +111,19 @@ impl RegistrationService {
                 .fetch_optional(&self.db_pool)
                 .await?;
         if user_exists.is_some() || self.check_duplicate_registration(&request.email).await? {
-            return Err(RegistrationError::DuplicateRegistration(request.email.clone()));
+            return Err(RegistrationError::DuplicateRegistration(
+                request.email.clone(),
+            ));
         }
 
-        let mut tx = self.db_pool.begin(). await?;
+        let mut tx = self.db_pool.begin().await?;
 
         let new_hospital = NewHospital {
-            name: request.hospital_name.clone(), email: request.email.clone(), phone: request.phone.clone(), registration_number: request.registration_number.clone(), admin_user_id: None,
+            name: request.hospital_name.clone(),
+            email: request.email.clone(),
+            phone: request.phone.clone(),
+            registration_number: request.registration_number.clone(),
+            admin_user_id: None,
         };
 
         let hospital = self.hospital_repo.create(&mut tx, new_hospital).await?;
@@ -151,10 +157,13 @@ impl RegistrationService {
             .execute(&mut *tx)
             .await?;
 
-        tx.commit(). await?;
+        tx.commit().await?;
 
         let registration_details = RegistrationDetails {
-            hospital_name: request.hospital_name.clone(), email: request.email.clone(), registration_number: request.registration_number.clone(), };
+            hospital_name: request.hospital_name.clone(),
+            email: request.email.clone(),
+            registration_number: request.registration_number.clone(),
+        };
 
         if let Err(e) = self
             .audit_service
@@ -178,8 +187,13 @@ impl RegistrationService {
         Ok(HospitalRegistrationResult {
             hospital_id,
             status: RegistrationStatus::Pending,
-            message: "Hospital registration submitted successfully. Awaiting admin approval.".to_string(), next_steps: vec![
-                "Upload required documents (license, accreditation)".to_string(), "Wait for system administrator review".to_string(), "You will receive an email notification upon approval".to_string(), ],
+            message: "Hospital registration submitted successfully. Awaiting admin approval."
+                .to_string(),
+            next_steps: vec![
+                "Upload required documents (license, accreditation)".to_string(),
+                "Wait for system administrator review".to_string(),
+                "You will receive an email notification upon approval".to_string(),
+            ],
         })
     }
 
@@ -189,63 +203,74 @@ impl RegistrationService {
         request: &HospitalRegistrationRequest,
     ) -> Result<(), RegistrationError> {
         // Validate hospital name
-        if request.hospital_name.trim(). is_empty() {
+        if request.hospital_name.trim().is_empty() {
             return Err(RegistrationError::ValidationError(
-                "Hospital name cannot be empty".to_string(), ));
+                "Hospital name cannot be empty".to_string(),
+            ));
         }
 
         if request.hospital_name.len() < 2 || request.hospital_name.len() > 200 {
             return Err(RegistrationError::ValidationError(
-                "Hospital name must be between 2 and 200 characters".to_string(), ));
+                "Hospital name must be between 2 and 200 characters".to_string(),
+            ));
         }
 
         // Validate email (RFC 5322)
         if validate_email_rfc5322(&request.email).is_err() {
             return Err(RegistrationError::ValidationError(
-                "Invalid email format (must conform to RFC 5322)".to_string(), ));
+                "Invalid email format (must conform to RFC 5322)".to_string(),
+            ));
         }
 
         // Validate phone (E.164)
         if validate_phone_e164(&request.phone).is_err() {
             return Err(RegistrationError::ValidationError(
-                "Invalid phone format (must conform to E.164)".to_string(), ));
+                "Invalid phone format (must conform to E.164)".to_string(),
+            ));
         }
 
         // Validate registration number
-        if request.registration_number.trim(). is_empty() {
+        if request.registration_number.trim().is_empty() {
             return Err(RegistrationError::ValidationError(
-                "Registration number cannot be empty".to_string(), ));
+                "Registration number cannot be empty".to_string(),
+            ));
         }
 
         if request.registration_number.len() < 5 || request.registration_number.len() > 50 {
             return Err(RegistrationError::ValidationError(
-                "Registration number must be between 5 and 50 characters".to_string(), ));
+                "Registration number must be between 5 and 50 characters".to_string(),
+            ));
         }
 
         // Validate address
-        if request.address.line1.trim(). is_empty() {
+        if request.address.line1.trim().is_empty() {
             return Err(RegistrationError::ValidationError(
-                "Address line 1 cannot be empty".to_string(), ));
+                "Address line 1 cannot be empty".to_string(),
+            ));
         }
 
-        if request.address.city.trim(). is_empty() {
+        if request.address.city.trim().is_empty() {
             return Err(RegistrationError::ValidationError(
-                "City cannot be empty".to_string(), ));
+                "City cannot be empty".to_string(),
+            ));
         }
 
-        if request.address.state.trim(). is_empty() {
+        if request.address.state.trim().is_empty() {
             return Err(RegistrationError::ValidationError(
-                "State cannot be empty".to_string(), ));
+                "State cannot be empty".to_string(),
+            ));
         }
 
-        if request.address.postal_code.trim(). is_empty() {
+        if request.address.postal_code.trim().is_empty() {
             return Err(RegistrationError::ValidationError(
-                "Postal code cannot be empty".to_string(), ));
+                "Postal code cannot be empty".to_string(),
+            ));
         }
 
-        if request.address.country.trim(). is_empty() {
+        if request.address.country.trim().is_empty() {
             return Err(RegistrationError::ValidationError(
-                "Country cannot be empty".to_string(), ));
+                "Country cannot be empty".to_string(),
+            ));
         }
 
         Ok(())
@@ -266,7 +291,7 @@ impl RegistrationService {
         admin_id: Option<Uuid>,
         notes: Option<String>,
     ) -> Result<(), RegistrationError> {
-        let mut tx = self.db_pool.begin(). await?;
+        let mut tx = self.db_pool.begin().await?;
 
         let hospital = self
             .hospital_repo
@@ -276,7 +301,9 @@ impl RegistrationService {
 
         if hospital.admin_registration_status != Some(RegistrationStatus::Pending) {
             return Err(RegistrationError::InvalidStatusTransition(
-                hospital.admin_registration_status.unwrap_or(RegistrationStatus::Pending),
+                hospital
+                    .admin_registration_status
+                    .unwrap_or(RegistrationStatus::Pending),
                 RegistrationStatus::Approved,
             ));
         }
@@ -315,7 +342,7 @@ impl RegistrationService {
         .execute(&mut *tx)
         .await?;
 
-        tx.commit(). await?;
+        tx.commit().await?;
 
         if let Err(e) = self
             .audit_service
@@ -342,25 +369,12 @@ impl RegistrationService {
             eprintln!("Warning: Failed to queue approval email: {}", e);
         }
 
-        // provision the hospital's SafeHaven sub-account, passing the verified BVN
-        let verified_bvn = self
-            .identity_service
-            .decrypted_number(IdentityOwner::Hospital, hospital_id, IdentityKind::Bvn)
-            .await
-            .unwrap_or(None);
-        if let Err(e) = self
-            .wallet_service
-            .ensure_sub_account(
-                hospital_id,
-                &hospital.phone_number,
-                &hospital.email,
-                "BVN",
-                verified_bvn.as_deref(),
-            )
-            .await
-        {
+        // Ensure a wallet row exists. SafeHaven sub-account provisioning is a
+        // separate, admin-driven step (it needs a fresh OTP) — see the
+        // /wallet/sub-account/{initiate,provision} endpoints.
+        if let Err(e) = self.wallet_service.ensure_wallet(hospital_id).await {
             eprintln!(
-                "Warning: Failed to provision SafeHaven sub-account for hospital {}: {}",
+                "Warning: Failed to ensure wallet row for hospital {}: {}",
                 hospital_id, e
             );
         }
@@ -374,17 +388,19 @@ impl RegistrationService {
         admin_id: Option<Uuid>,
         reason: String,
     ) -> Result<(), RegistrationError> {
-        if reason.trim(). is_empty() {
+        if reason.trim().is_empty() {
             return Err(RegistrationError::ValidationError(
-                "Rejection reason cannot be empty".to_string(), ));
+                "Rejection reason cannot be empty".to_string(),
+            ));
         }
 
         if reason.len() < 10 || reason.len() > 500 {
             return Err(RegistrationError::ValidationError(
-                "Rejection reason must be between 10 and 500 characters".to_string(), ));
+                "Rejection reason must be between 10 and 500 characters".to_string(),
+            ));
         }
 
-        let mut tx = self.db_pool.begin(). await?;
+        let mut tx = self.db_pool.begin().await?;
 
         let hospital = self
             .hospital_repo
@@ -394,7 +410,9 @@ impl RegistrationService {
 
         if hospital.admin_registration_status != Some(RegistrationStatus::Pending) {
             return Err(RegistrationError::InvalidStatusTransition(
-                hospital.admin_registration_status.unwrap_or(RegistrationStatus::Pending),
+                hospital
+                    .admin_registration_status
+                    .unwrap_or(RegistrationStatus::Pending),
                 RegistrationStatus::Rejected,
             ));
         }
@@ -409,7 +427,7 @@ impl RegistrationService {
             )
             .await?;
 
-        tx.commit(). await?;
+        tx.commit().await?;
 
         if let Err(e) = self
             .audit_service
@@ -453,7 +471,9 @@ impl RegistrationService {
         Ok(RegistrationStatusResponse {
             hospital_id: hospital.id,
             hospital_name: hospital.name,
-            status: hospital.admin_registration_status.unwrap_or(RegistrationStatus::Pending),
+            status: hospital
+                .admin_registration_status
+                .unwrap_or(RegistrationStatus::Pending),
             created_at: hospital.created_at,
             updated_at: hospital.updated_at,
             approved_at: None, // Will be populated from hospital.approved_at when available
@@ -486,7 +506,8 @@ impl RegistrationService {
         let total_pages = (total as f64 / page_size as f64).ceil() as i64;
 
         Ok(HospitalListResponse {
-            hospitals: hospitals.into_iter(). map(HospitalSummary::from).collect(), pagination: PaginationMetadata {
+            hospitals: hospitals.into_iter().map(HospitalSummary::from).collect(),
+            pagination: PaginationMetadata {
                 current_page: page,
                 page_size,
                 total_items: total,

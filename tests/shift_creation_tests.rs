@@ -2,9 +2,9 @@ use chrono::{Duration, Timelike, Utc};
 use nexuscare_backend::models::shift::{
     CreateShiftRequest, PayType, RoleCategory, ShiftPriority, ShiftType,
 };
-use nexuscare_backend::services::shift_service::{ShiftService, ShiftServiceError};
 use nexuscare_backend::repositories::shift::ShiftRepository;
 use nexuscare_backend::services::notification_service::NotificationService;
+use nexuscare_backend::services::shift_service::{ShiftService, ShiftServiceError};
 use sqlx::PgPool;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -40,9 +40,7 @@ fn create_valid_shift_request() -> CreateShiftRequest {
 
 /// Snap a timestamp forward to the next 15-minute boundary with zero seconds.
 fn next_15min_boundary(ts: chrono::DateTime<Utc>) -> chrono::DateTime<Utc> {
-    let snapped = ts
-        .with_second(0).unwrap()
-        .with_nanosecond(0).unwrap();
+    let snapped = ts.with_second(0).unwrap().with_nanosecond(0).unwrap();
     let minute = snapped.minute();
     let remainder = minute % 15;
     if remainder == 0 {
@@ -62,7 +60,7 @@ mod shift_creation_tests {
         // This test would require a test database setup
         // For now, we validate the request structure
         let request = create_valid_shift_request();
-        
+
         assert_eq!(request.role_title, "Emergency Doctor");
         assert_eq!(request.duration_hours, 8.0);
         assert!(request.broadcast_consent_confirmed);
@@ -74,7 +72,7 @@ mod shift_creation_tests {
     fn test_missing_role_title() {
         let mut request = create_valid_shift_request();
         request.role_title = "".to_string();
-        
+
         // Validation would fail in the service layer
         assert!(request.role_title.is_empty());
     }
@@ -85,7 +83,7 @@ mod shift_creation_tests {
         let mut request = create_valid_shift_request();
         request.pay_type = PayType::HourlyRate;
         request.rate_kobo_per_hour = None;
-        
+
         // This should fail validation
         assert!(request.rate_kobo_per_hour.is_none());
     }
@@ -97,7 +95,7 @@ mod shift_creation_tests {
         request.priority = ShiftPriority::Stat;
         request.scheduled_start = Utc::now() + Duration::minutes(30);
         request.stat_bonus_kobo = Some(500_000); // ₦5,000 bonus
-        
+
         let time_until_start = request.scheduled_start.signed_duration_since(Utc::now());
         assert!(time_until_start <= Duration::hours(1));
         assert!(request.stat_bonus_kobo.is_some());
@@ -110,7 +108,7 @@ mod shift_creation_tests {
         request.priority = ShiftPriority::Stat;
         request.scheduled_start = Utc::now() + Duration::hours(2);
         request.stat_bonus_kobo = Some(500_000);
-        
+
         let time_until_start = request.scheduled_start.signed_duration_since(Utc::now());
         assert!(time_until_start > Duration::hours(1));
     }
@@ -123,7 +121,7 @@ mod shift_creation_tests {
         request.scheduled_start = Utc::now() + Duration::minutes(30);
         request.stat_bonus_kobo = None;
         request.urgency_bonus_pct = None;
-        
+
         // Should fail validation - STAT requires bonus
         assert!(request.stat_bonus_kobo.is_none() && request.urgency_bonus_pct.is_none());
     }
@@ -133,7 +131,7 @@ mod shift_creation_tests {
     fn test_virtual_shift_no_distance_restriction() {
         let mut request = create_valid_shift_request();
         request.shift_type = ShiftType::Virtual;
-        
+
         assert_eq!(request.shift_type, ShiftType::Virtual);
         // Virtual shifts should generate a meeting link
     }
@@ -143,7 +141,7 @@ mod shift_creation_tests {
     fn test_in_person_shift_distance_restriction() {
         let mut request = create_valid_shift_request();
         request.shift_type = ShiftType::InPerson;
-        
+
         assert_eq!(request.shift_type, ShiftType::InPerson);
         // In-person shifts should apply 5km distance filter
     }
@@ -152,10 +150,11 @@ mod shift_creation_tests {
     #[test]
     fn test_shift_preview_compensation() {
         let request = create_valid_shift_request();
-        
-        let base_amount = request.rate_kobo_per_hour.unwrap() as f64 * request.duration_hours as f64;
+
+        let base_amount =
+            request.rate_kobo_per_hour.unwrap() as f64 * request.duration_hours as f64;
         let expected_base = 6_400_000; // 800,000 * 8 = ₦64,000
-        
+
         assert_eq!(base_amount as i64, expected_base);
     }
 
@@ -166,11 +165,12 @@ mod shift_creation_tests {
         request.priority = ShiftPriority::Stat;
         request.scheduled_start = Utc::now() + Duration::minutes(30);
         request.stat_bonus_kobo = Some(500_000); // ₦5,000
-        
-        let base_amount = request.rate_kobo_per_hour.unwrap() as f64 * request.duration_hours as f64;
+
+        let base_amount =
+            request.rate_kobo_per_hour.unwrap() as f64 * request.duration_hours as f64;
         let grand_total = base_amount as i64 + request.stat_bonus_kobo.unwrap();
         let expected_total = 6_900_000; // ₦64,000 + ₦5,000 = ₦69,000
-        
+
         assert_eq!(grand_total, expected_total);
     }
 
@@ -179,7 +179,7 @@ mod shift_creation_tests {
     fn test_broadcast_consent_required() {
         let mut request = create_valid_shift_request();
         request.broadcast_consent_confirmed = false;
-        
+
         // Should fail validation
         assert!(!request.broadcast_consent_confirmed);
     }
@@ -188,13 +188,13 @@ mod shift_creation_tests {
     #[test]
     fn test_duplicate_shift_detection() {
         let scheduled_time = Utc::now() + Duration::hours(2);
-        
+
         let mut request1 = create_valid_shift_request();
         request1.scheduled_start = scheduled_time;
-        
+
         let mut request2 = create_valid_shift_request();
         request2.scheduled_start = scheduled_time;
-        
+
         // Same role title and scheduled start time
         assert_eq!(request1.role_title, request2.role_title);
         assert_eq!(request1.scheduled_start, request2.scheduled_start);
@@ -207,7 +207,7 @@ mod shift_creation_tests {
         request.pay_type = PayType::FixedRate;
         request.rate_kobo_per_hour = None;
         request.fixed_rate_kobo = Some(5_000_000); // ₦50,000 fixed
-        
+
         assert_eq!(request.pay_type, PayType::FixedRate);
         assert!(request.fixed_rate_kobo.is_some());
         assert_eq!(request.fixed_rate_kobo.unwrap(), 5_000_000);
@@ -219,7 +219,7 @@ mod shift_creation_tests {
         let mut request = create_valid_shift_request();
         request.priority = ShiftPriority::Urgent;
         request.urgency_bonus_pct = Some(20); // +20% bonus
-        
+
         assert_eq!(request.priority, ShiftPriority::Urgent);
         assert_eq!(request.urgency_bonus_pct, Some(20));
     }
@@ -228,7 +228,7 @@ mod shift_creation_tests {
     #[test]
     fn test_duration_validation() {
         let request = create_valid_shift_request();
-        
+
         // Duration should be between 0.5 and 24 hours
         assert!(request.duration_hours >= 0.5);
         assert!(request.duration_hours <= 24.0);
@@ -238,7 +238,7 @@ mod shift_creation_tests {
     #[test]
     fn test_optional_fields() {
         let request = create_valid_shift_request();
-        
+
         assert!(request.specialty.is_some());
         assert!(request.department.is_some());
         assert!(request.shift_label.is_some());
@@ -249,14 +249,20 @@ mod shift_creation_tests {
     fn test_hospital_approval_required() {
         // This test validates that only approved hospitals can create shifts
         // In production, this would be enforced by the service layer
-        
+
         // Mock scenario: Hospital with pending status
         let is_approved = false;
-        assert!(!is_approved, "Pending hospitals should not be able to create shifts");
-        
+        assert!(
+            !is_approved,
+            "Pending hospitals should not be able to create shifts"
+        );
+
         // Mock scenario: Hospital with approved status
         let is_approved = true;
-        assert!(is_approved, "Approved hospitals should be able to create shifts");
+        assert!(
+            is_approved,
+            "Approved hospitals should be able to create shifts"
+        );
     }
 
     /// Test hospital name is included in shift
