@@ -29,7 +29,6 @@ impl WalletRepository {
 
     /// Idempotently create the wallet row for a hospital
 
-
     pub async fn ensure_wallet_row(&self, hospital_id: Uuid) -> Result<(), WalletRepoError> {
         sqlx::query(
             r#"
@@ -94,6 +93,54 @@ impl WalletRepository {
         Ok(())
     }
 
+    /// Stash the fresh verification id + BVN from a sub-account provisioning
+    /// initiate, so the provision step can pass identityId + otp.
+    pub async fn save_provisioning_state(
+        &self,
+        hospital_id: Uuid,
+        identity_id: &str,
+        bvn: &str,
+    ) -> Result<(), WalletRepoError> {
+        sqlx::query(
+            r#"
+            INSERT INTO hospital_wallets
+                (hospital_id, provisioning_identity_id, provisioning_bvn)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (hospital_id) DO UPDATE
+              SET provisioning_identity_id = EXCLUDED.provisioning_identity_id,
+                  provisioning_bvn         = EXCLUDED.provisioning_bvn,
+                  updated_at               = NOW()
+            "#,
+        )
+        .bind(hospital_id)
+        .bind(identity_id)
+        .bind(bvn)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Read the pending provisioning state (identity_id, bvn).
+    pub async fn get_provisioning_state(
+        &self,
+        hospital_id: Uuid,
+    ) -> Result<Option<(String, String)>, WalletRepoError> {
+        let row: Option<(Option<String>, Option<String>)> = sqlx::query_as(
+            r#"
+            SELECT provisioning_identity_id, provisioning_bvn
+            FROM hospital_wallets
+            WHERE hospital_id = $1
+            "#,
+        )
+        .bind(hospital_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.and_then(|(id, bvn)| match (id, bvn) {
+            (Some(id), Some(bvn)) => Some((id, bvn)),
+            _ => None,
+        }))
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub async fn insert_ledger_entry_in_tx(
         &self,
@@ -153,12 +200,11 @@ impl WalletRepository {
         .fetch_all(&self.pool)
         .await?;
 
-        let total: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM wallet_ledger_entries WHERE hospital_id = $1",
-        )
-        .bind(hospital_id)
-        .fetch_one(&self.pool)
-        .await?;
+        let total: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM wallet_ledger_entries WHERE hospital_id = $1")
+                .bind(hospital_id)
+                .fetch_one(&self.pool)
+                .await?;
 
         Ok((rows, total))
     }
@@ -226,7 +272,6 @@ impl WalletRepository {
     }
 
     /// Inverse of `try_hold_in_tx` — escrowed funds go back to the available balance
-
 
     pub async fn release_hold_in_tx(
         &self,
@@ -392,7 +437,6 @@ impl WalletRepository {
 
     /// Mark a pending deposit as received, credit the wallet, append the ledger row
 
-
     pub async fn complete_deposit_in_tx(
         &self,
         tx: &mut Transaction<'_, Postgres>,
@@ -450,7 +494,6 @@ impl WalletRepository {
     }
 
     /// Idempotent webhook insert. Returns `Some(id)` for a new event, `None` for a duplicate
-
 
     pub async fn insert_webhook_event_if_new(
         &self,

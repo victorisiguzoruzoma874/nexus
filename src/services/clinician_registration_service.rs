@@ -1,18 +1,18 @@
-use std::sync::Arc;
 use chrono::{Duration, Utc};
 use sqlx::PgPool;
+use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::models::clinician_registration::{
-    AddBankAccountRequest, BankAccountResponse, CompleteProfileRequest,
-    ProfileResponse, SendOtpResponse, VerifyOtpResponse,
+    AddBankAccountRequest, BankAccountResponse, CompleteProfileRequest, ProfileResponse,
+    SendOtpResponse, VerifyOtpResponse,
 };
 use crate::repositories::clinician::{ClinicianRepoError, ClinicianRepository};
-use crate::services::safehaven::{SafeHavenClient, SafeHavenError};
-use crate::services::encryption::EncryptionService;
 use crate::services::email_outbox_service::{EmailOutboxError, EmailOutboxService};
 use crate::services::email_templates;
+use crate::services::encryption::EncryptionService;
 use crate::services::identity_verification_service::{IdentityOwner, IdentityVerificationService};
+use crate::services::safehaven::{SafeHavenClient, SafeHavenError};
 use crate::utils::validation::validate_email_rfc5322;
 
 #[derive(Debug, thiserror::Error)]
@@ -59,7 +59,14 @@ impl ClinicianRegistrationService {
         pool: PgPool,
         identity_service: Arc<IdentityVerificationService>,
     ) -> Self {
-        Self { repo, email_outbox, safehaven, encryption, pool, identity_service }
+        Self {
+            repo,
+            email_outbox,
+            safehaven,
+            encryption,
+            pool,
+            identity_service,
+        }
     }
 
     // Send OTP
@@ -95,7 +102,8 @@ impl ClinicianRegistrationService {
         self.email_outbox.enqueue_email(email, &content).await?;
 
         Ok(SendOtpResponse {
-            message: "OTP sent successfully".to_string(), })
+            message: "OTP sent successfully".to_string(),
+        })
     }
 
     // Verify OTP → create account → return JWT
@@ -118,7 +126,9 @@ impl ClinicianRegistrationService {
         .fetch_optional(&self.pool)
         .await?;
 
-        let otp_id = row.map(|(id,)| id).ok_or(ClinicianRegistrationError::InvalidOtp)?;
+        let otp_id = row
+            .map(|(id,)| id)
+            .ok_or(ClinicianRegistrationError::InvalidOtp)?;
 
         // Mark OTP as used
         sqlx::query("UPDATE clinician_email_otp_codes SET used = TRUE WHERE id = $1")
@@ -127,9 +137,9 @@ impl ClinicianRegistrationService {
             .await?;
 
         // Create user + clinician in a transaction
-        let mut tx = self.pool.begin(). await?;
+        let mut tx = self.pool.begin().await?;
         let clinician_id = self.repo.create_clinician(&mut tx, email).await?;
-        tx.commit(). await?;
+        tx.commit().await?;
 
         let token = issue_jwt(clinician_id)?;
 
@@ -139,7 +149,8 @@ impl ClinicianRegistrationService {
         Ok(VerifyOtpResponse {
             clinician_id,
             access_token: token,
-            message: "Account created successfully".to_string(), })
+            message: "Account created successfully".to_string(),
+        })
     }
 
     // Complete profile
@@ -148,13 +159,15 @@ impl ClinicianRegistrationService {
         clinician_id: Uuid,
         req: CompleteProfileRequest,
     ) -> Result<ProfileResponse, ClinicianRegistrationError> {
-        if req.first_name.trim(). is_empty() || req.last_name.trim(). is_empty() {
+        if req.first_name.trim().is_empty() || req.last_name.trim().is_empty() {
             return Err(ClinicianRegistrationError::Validation(
-                "Full name is required".to_string(), ));
+                "Full name is required".to_string(),
+            ));
         }
-        if req.license_number.trim(). is_empty() {
+        if req.license_number.trim().is_empty() {
             return Err(ClinicianRegistrationError::Validation(
-                "License number is required".to_string(), ));
+                "License number is required".to_string(),
+            ));
         }
 
         self.repo
@@ -217,7 +230,12 @@ impl ClinicianRegistrationService {
             .map_err(|e| ClinicianRegistrationError::Encryption(e.to_string()))?;
 
         self.repo
-            .upsert_bank_account(clinician_id, &encrypted, &req.bank_code, &resolved.account_name)
+            .upsert_bank_account(
+                clinician_id,
+                &encrypted,
+                &req.bank_code,
+                &resolved.account_name,
+            )
             .await?;
 
         let masked = mask_account(&req.account_number);
@@ -302,7 +320,11 @@ mod tests {
         for _ in 0..20 {
             let code = generate_otp();
             assert_eq!(code.len(), 6, "OTP must be 6 chars: {}", code);
-            assert!(code.chars().all(|c| c.is_ascii_digit()), "OTP must be numeric: {}", code);
+            assert!(
+                code.chars().all(|c| c.is_ascii_digit()),
+                "OTP must be numeric: {}",
+                code
+            );
         }
     }
 
@@ -352,7 +374,12 @@ mod tests {
 
     fn mock_safehaven() -> crate::services::safehaven::SafeHavenClient {
         crate::services::safehaven::SafeHavenClient::new(
-            String::new(), "test-client".to_string(), "test-ibs".to_string(), "0000000000".to_string(), "090286".to_string(), )
+            String::new(),
+            "test-client".to_string(),
+            "test-ibs".to_string(),
+            "0000000000".to_string(),
+            "090286".to_string(),
+        )
     }
 
     #[tokio::test]

@@ -8,10 +8,10 @@ use crate::models::location::HospitalLocation;
 pub enum LocationError {
     #[error("Database error: {0}")]
     DatabaseError(#[from] sqlx::Error),
-    
+
     #[error("Location not found for hospital: {0}")]
     NotFound(Uuid),
-    
+
     #[error("Invalid coordinates: latitude={0}, longitude={1}")]
     InvalidCoordinates(f64, f64),
 }
@@ -154,14 +154,13 @@ mod tests {
     // Unit tests will be added here
 }
 
-
 #[cfg(test)]
 mod property_tests {
     use super::*;
     use proptest::prelude::*;
 
     // Property 6: Location data persistence round-trip
-    
+
     proptest! {
         #[test]
         fn property_9_coordinate_validation_rejects_invalid_coords(

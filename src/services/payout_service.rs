@@ -18,7 +18,6 @@ pub const MIN_PAYOUT_KOBO: i64 = 500_000;
 
 /// `(gross, fee, net)` such that `gross == fee + net`
 
-
 pub fn split_payout(gross_kobo: i64) -> (i64, i64, i64) {
     let fee = gross_kobo * PLATFORM_FEE_NUMERATOR / PLATFORM_FEE_DENOMINATOR;
     let net = gross_kobo - fee;
@@ -71,20 +70,15 @@ impl PayoutService {
 
     /// One scheduler tick. Returns the number of transfers kicked off
 
-
     pub async fn run_tick(&self) -> Result<usize, PayoutServiceError> {
-        let candidates = self.find_payable_shifts(). await?;
+        let candidates = self.find_payable_shifts().await?;
         let mut started = 0usize;
         for s in candidates {
             match self.process_one(&s).await {
                 Ok(true) => started += 1,
                 Ok(false) => {}
                 Err(e) => {
-                    tracing::error!(
-                        "Payout failed for shift {}: {}",
-                        s.shift_id,
-                        e
-                    );
+                    tracing::error!("Payout failed for shift {}: {}", s.shift_id, e);
                 }
             }
         }
@@ -133,28 +127,42 @@ impl PayoutService {
         let (gross, fee, net) = split_payout(gross);
 
         if net < MIN_PAYOUT_KOBO {
-            self.record_failed_payout(p, gross, fee, net, "below minimum payout threshold (₦5,000)")
-                .await?;
+            self.record_failed_payout(
+                p,
+                gross,
+                fee,
+                net,
+                "below minimum payout threshold (₦5,000)",
+            )
+            .await?;
             return Ok(false);
         }
 
         let bank = match self.clinician_repo.get_bank_account(p.clinician_id).await {
             Ok(Some(b)) => b,
             Ok(None) => {
-                self.record_failed_payout(p, gross, fee, net, "clinician has no stored bank account")
-                    .await?;
+                self.record_failed_payout(
+                    p,
+                    gross,
+                    fee,
+                    net,
+                    "clinician has no stored bank account",
+                )
+                .await?;
                 return Ok(false);
             }
-            Err(e) => return Err(PayoutServiceError::Database(sqlx::Error::Configuration(
-                Box::<dyn std::error::Error + Send + Sync>::from(e.to_string()),
-            ))),
+            Err(e) => {
+                return Err(PayoutServiceError::Database(sqlx::Error::Configuration(
+                    Box::<dyn std::error::Error + Send + Sync>::from(e.to_string()),
+                )))
+            }
         };
         let account_number = self
             .encryption
             .decrypt_token(&bank.account_number)
             .map_err(|e| PayoutServiceError::Encryption(e.to_string()))?;
 
-        let mut tx = self.pool.begin(). await?;
+        let mut tx = self.pool.begin().await?;
         let payout_id: Uuid = sqlx::query_scalar(
             r#"
             INSERT INTO billing_transactions (
@@ -190,7 +198,8 @@ impl PayoutService {
                     PayoutServiceError::Database(db)
                 }
                 _ => PayoutServiceError::Database(sqlx::Error::Protocol(
-                    "wallet ledger error".to_string(), )),
+                    "wallet ledger error".to_string(),
+                )),
             })?;
 
         sqlx::query(
@@ -220,7 +229,7 @@ impl PayoutService {
         .bind(net)
         .execute(&mut *tx)
         .await?;
-        tx.commit(). await?;
+        tx.commit().await?;
 
         match self
             .safehaven
@@ -229,7 +238,8 @@ impl PayoutService {
                 &account_number,
                 net / 100,
                 &format!("NexusCare shift {}", p.shift_id),
-                &payout_id.to_string(), None,
+                &payout_id.to_string(),
+                None,
             )
             .await
         {
@@ -240,7 +250,7 @@ impl PayoutService {
                        SET status                  = 'success',
                            provider_reference      = $2,
                            provider_transaction_id = $3,
-                           completed_at            = NOW, updated_at              = NOW()
+                           completed_at            = NOW(), updated_at              = NOW()
                      WHERE id = $1
                     "#,
                 )
@@ -261,7 +271,8 @@ impl PayoutService {
                 // Transfer rejected synchronously. Reverse the escrow debit so the
                 // shift becomes payable again (find_payable_shifts retries failed
                 // rows up to 3 times), then mark this attempt failed.
-                self.refund_payout(p, payout_id, gross, &e.to_string()).await?;
+                self.refund_payout(p, payout_id, gross, &e.to_string())
+                    .await?;
                 tracing::error!(
                     "Payout {} for shift {} failed at SafeHaven (refunded escrow): {}",
                     payout_id,
@@ -299,16 +310,19 @@ impl PayoutService {
         .execute(&mut *tx)
         .await?;
 
+        // The original payout debited `held_kobo` (consuming the shift escrow).
+        // On failure, return the gross to AVAILABLE balance so it is spendable
+        // again — not back into held, which would strand it in escrow.
         self.wallet_repo
             .insert_ledger_entry_in_tx(
                 &mut tx,
                 p.hospital_id,
                 "payout_reversal",
-                0,
                 gross,
+                0,
                 Some(p.shift_id),
                 Some(&payout_id.to_string()),
-                Some("escrow re-credited after failed transfer"),
+                Some("escrow re-credited to balance after failed transfer"),
             )
             .await
             .map_err(|e| match e {
@@ -323,8 +337,8 @@ impl PayoutService {
         sqlx::query(
             r#"
             UPDATE hospital_wallets
-               SET held_kobo  = held_kobo + $2,
-                   updated_at = NOW()
+               SET balance_kobo = balance_kobo + $2,
+                   updated_at   = NOW()
              WHERE hospital_id = $1
             "#,
         )
@@ -365,11 +379,7 @@ impl PayoutService {
         .bind(format!("Payout failed: {reason}"))
         .execute(&self.pool)
         .await?;
-        tracing::warn!(
-            "Payout for shift {} not initiated: {}",
-            p.shift_id,
-            reason
-        );
+        tracing::warn!("Payout for shift {} not initiated: {}", p.shift_id, reason);
         Ok(())
     }
 
@@ -504,10 +514,11 @@ impl PayoutService {
         };
         let Some(reference) = r.provider_reference.clone() else {
             // No transfer was ever sent (e.g. failed pre-flight). Return stored status.
-            let st: String = sqlx::query_scalar("SELECT status FROM billing_transactions WHERE id = $1")
-                .bind(payout_id)
-                .fetch_one(&self.pool)
-                .await?;
+            let st: String =
+                sqlx::query_scalar("SELECT status FROM billing_transactions WHERE id = $1")
+                    .bind(payout_id)
+                    .fetch_one(&self.pool)
+                    .await?;
             return Ok(st);
         };
 
@@ -532,8 +543,13 @@ impl PayoutService {
                     role_title: r.role_title.clone(),
                 };
                 let (gross, _f, _n) = split_payout(r.grand_total_kobo.unwrap_or(0));
-                self.refund_payout(&p, payout_id, gross, "transfer reported failed by SafeHaven")
-                    .await?;
+                self.refund_payout(
+                    &p,
+                    payout_id,
+                    gross,
+                    "transfer reported failed by SafeHaven",
+                )
+                .await?;
                 Ok("failed".to_string())
             }
             _ => Ok("processing".to_string()),

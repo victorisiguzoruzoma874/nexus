@@ -3,8 +3,8 @@ use uuid::Uuid;
 use validator::Validate;
 
 use crate::models::clinician_registration::{
-    AddBankAccountRequest, BankAccountResponse, CompleteProfileRequest,
-    ProfileResponse, SendOtpRequest, SendOtpResponse, VerifyOtpRequest, VerifyOtpResponse,
+    AddBankAccountRequest, BankAccountResponse, CompleteProfileRequest, ProfileResponse,
+    SendOtpRequest, SendOtpResponse, VerifyOtpRequest, VerifyOtpResponse,
 };
 use crate::routes::AppState;
 use crate::services::clinician_registration_service::ClinicianRegistrationError;
@@ -28,7 +28,8 @@ pub async fn send_otp(
     State(state): State<AppState>,
     Json(req): Json<SendOtpRequest>,
 ) -> AppResult<(StatusCode, Json<SendOtpResponse>)> {
-    req.validate(). map_err(|e| AppError::Validation(e.to_string()))?;
+    req.validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
 
     state
         .clinician_registration_service
@@ -55,11 +56,12 @@ pub async fn verify_otp(
     State(state): State<AppState>,
     Json(req): Json<VerifyOtpRequest>,
 ) -> AppResult<(StatusCode, Json<VerifyOtpResponse>)> {
-    req.validate(). map_err(|e| AppError::Validation(e.to_string()))?;
+    req.validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
 
     state
         .clinician_registration_service
-        .verify_otp(&req.email, &req.otp)
+        .verify_otp(&req.email, &req.code)
         .await
         .map(|r| (StatusCode::CREATED, Json(r)))
         .map_err(map_err)
@@ -87,7 +89,8 @@ pub async fn complete_profile(
     axum::extract::Path(clinician_id): axum::extract::Path<Uuid>,
     Json(req): Json<CompleteProfileRequest>,
 ) -> AppResult<Json<ProfileResponse>> {
-    req.validate(). map_err(|e| AppError::Validation(e.to_string()))?;
+    req.validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
 
     state
         .clinician_registration_service
@@ -119,7 +122,8 @@ pub async fn add_bank_account(
     axum::extract::Path(clinician_id): axum::extract::Path<Uuid>,
     Json(req): Json<AddBankAccountRequest>,
 ) -> AppResult<Json<BankAccountResponse>> {
-    req.validate(). map_err(|e| AppError::Validation(e.to_string()))?;
+    req.validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
 
     state
         .clinician_registration_service

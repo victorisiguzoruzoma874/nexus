@@ -1,8 +1,8 @@
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
-use crate::models::clinician_registration::{ClinicianBankAccount, ClinicianRole};
 use crate::models::clinician::{ClinicalSpecialty, ClinicianAdminSummary};
+use crate::models::clinician_registration::{ClinicianBankAccount, ClinicianRole};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClinicianRepoError {
@@ -25,11 +25,10 @@ impl ClinicianRepository {
 
     /// Check if email is already registered
     pub async fn email_exists(&self, email: &str) -> Result<bool, ClinicianRepoError> {
-        let row: Option<(i64,)> =
-            sqlx::query_as("SELECT COUNT(*) FROM users WHERE email = $1")
-                .bind(email)
-                .fetch_optional(&self.pool)
-                .await?;
+        let row: Option<(i64,)> = sqlx::query_as("SELECT COUNT(*) FROM users WHERE email = $1")
+            .bind(email)
+            .fetch_optional(&self.pool)
+            .await?;
         Ok(row.map(|(c,)| c > 0).unwrap_or(false))
     }
 

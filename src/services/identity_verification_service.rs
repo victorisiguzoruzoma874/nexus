@@ -82,7 +82,11 @@ impl IdentityVerificationService {
         encryption: Arc<EncryptionService>,
         repo: Arc<IdentityVerificationRepository>,
     ) -> Self {
-        Self { safehaven, encryption, repo }
+        Self {
+            safehaven,
+            encryption,
+            repo,
+        }
     }
 
     /// Initiate BVN/NIN verification: calls SafeHaven (which sends an OTP),
@@ -137,7 +141,9 @@ impl IdentityVerificationService {
             .get(owner.as_str(), owner_id, id_type.as_db())
             .await?
             .ok_or(IdentityError::NotInitiated)?;
-        let identity_id = row.provider_identity_id.ok_or(IdentityError::NotInitiated)?;
+        let identity_id = row
+            .provider_identity_id
+            .ok_or(IdentityError::NotInitiated)?;
 
         let payload = self
             .safehaven
@@ -167,6 +173,22 @@ impl IdentityVerificationService {
         owner_id: Uuid,
         id_type: IdentityKind,
     ) -> Result<Option<String>, IdentityError> {
+        Ok(self
+            .verified_identity(owner, owner_id, id_type)
+            .await?
+            .map(|v| v.number))
+    }
+
+    /// Fetch a verified identity's decrypted number plus the SafeHaven
+    /// `provider_identity_id` (the verification `_id`). SafeHaven's sub-account
+    /// endpoint requires this `identityId` for BVN/NIN. Returns None unless the
+    /// identity is verified and has a provider id.
+    pub async fn verified_identity(
+        &self,
+        owner: IdentityOwner,
+        owner_id: Uuid,
+        id_type: IdentityKind,
+    ) -> Result<Option<VerifiedIdentity>, IdentityError> {
         let row = self
             .repo
             .get(owner.as_str(), owner_id, id_type.as_db())
@@ -177,9 +199,19 @@ impl IdentityVerificationService {
                     .encryption
                     .decrypt_token(&r.identity_number)
                     .map_err(|e| IdentityError::Encryption(e.to_string()))?;
-                Ok(Some(number))
+                Ok(Some(VerifiedIdentity {
+                    number,
+                    provider_identity_id: r.provider_identity_id,
+                }))
             }
             _ => Ok(None),
         }
     }
+}
+
+/// A verified identity's decrypted number + SafeHaven verification id.
+#[derive(Debug, Clone)]
+pub struct VerifiedIdentity {
+    pub number: String,
+    pub provider_identity_id: Option<String>,
 }

@@ -3,8 +3,7 @@ use validator::Validate;
 
 use crate::{
     models::user::{
-        EmailLoginRequest, EmailOtpVerifyRequest, LoginResponse, LogoutRequest,
-        RefreshTokenRequest,
+        EmailLoginRequest, EmailOtpVerifyRequest, LoginResponse, LogoutRequest, RefreshTokenRequest,
     },
     routes::AppState,
     services::auth_service::AuthError,
@@ -31,7 +30,9 @@ pub async fn email_otp_send(
     State(state): State<AppState>,
     Json(payload): Json<EmailLoginRequest>,
 ) -> AppResult<StatusCode> {
-    payload.validate(). map_err(|e| AppError::Validation(e.to_string()))?;
+    payload
+        .validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
 
     state
         .auth_service
@@ -59,7 +60,9 @@ pub async fn email_otp_verify(
     State(state): State<AppState>,
     Json(payload): Json<EmailOtpVerifyRequest>,
 ) -> AppResult<Json<LoginResponse>> {
-    payload.validate(). map_err(|e| AppError::Validation(e.to_string()))?;
+    payload
+        .validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
 
     state
         .auth_service
@@ -89,7 +92,9 @@ pub async fn refresh_token(
     State(state): State<AppState>,
     Json(payload): Json<RefreshTokenRequest>,
 ) -> AppResult<Json<LoginResponse>> {
-    payload.validate(). map_err(|e| AppError::Validation(e.to_string()))?;
+    payload
+        .validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
 
     state
         .auth_service
@@ -119,7 +124,9 @@ pub async fn logout(
     State(state): State<AppState>,
     Json(payload): Json<LogoutRequest>,
 ) -> AppResult<StatusCode> {
-    payload.validate(). map_err(|e| AppError::Validation(e.to_string()))?;
+    payload
+        .validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
 
     state
         .auth_service

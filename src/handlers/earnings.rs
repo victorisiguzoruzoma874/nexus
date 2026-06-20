@@ -71,13 +71,12 @@ pub async fn get_earnings(
         .map_err(|_| AppError::Unauthorized("Invalid user ID in token".to_string()))?;
 
     // Resolve clinician_id from the authenticated user.
-    let clinician_id: Option<Uuid> = sqlx::query_scalar(
-        "SELECT id FROM clinicians WHERE user_id = $1",
-    )
-    .bind(user_id)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(AppError::Database)?;
+    let clinician_id: Option<Uuid> =
+        sqlx::query_scalar("SELECT id FROM clinicians WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_optional(&state.pool)
+            .await
+            .map_err(AppError::Database)?;
     let clinician_id = clinician_id
         .ok_or_else(|| AppError::Forbidden("Caller has no clinician profile".to_string()))?;
 

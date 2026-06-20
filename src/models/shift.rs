@@ -1,9 +1,9 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use utoipa::ToSchema;
 use uuid::Uuid;
 use validator::Validate;
-use utoipa::ToSchema;
 
 // Enums
 
@@ -560,7 +560,11 @@ pub struct CreateShiftRequest {
     pub urgency_bonus_pct: Option<i16>,
 
     pub scheduled_start: DateTime<Utc>,
-    #[validate(range(min = 0.5, max = 24.0, message = "Duration must be between 0.5 and 24 hours"))]
+    #[validate(range(
+        min = 0.5,
+        max = 24.0,
+        message = "Duration must be between 0.5 and 24 hours"
+    ))]
     pub duration_hours: f32,
 
     // --- Step 2: Compensation ---
@@ -576,7 +580,10 @@ pub struct CreateShiftRequest {
     pub shift_label: Option<String>,
 
     /// F1-F11: Free-text job description, capped at 2000 chars.
-    #[validate(length(max = 2000, message = "Job description must be 2000 characters or less"))]
+    #[validate(length(
+        max = 2000,
+        message = "Job description must be 2000 characters or less"
+    ))]
     pub job_description: Option<String>,
 
     /// F1-F12: Tasks the clinician will perform. Required, at least one entry.

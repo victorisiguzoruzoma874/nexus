@@ -1,5 +1,5 @@
-use sqlx::PgPool;
 use serde_json::Value;
+use sqlx::PgPool;
 use uuid::Uuid;
 
 #[derive(Debug, thiserror::Error)]
@@ -109,11 +109,13 @@ impl IdentityVerificationRepository {
         .fetch_optional(&self.pool)
         .await?;
 
-        Ok(row.map(|(provider_identity_id, identity_number, status)| IdentityVerificationRow {
-            provider_identity_id,
-            identity_number,
-            status,
-        }))
+        Ok(row.map(
+            |(provider_identity_id, identity_number, status)| IdentityVerificationRow {
+                provider_identity_id,
+                identity_number,
+                status,
+            },
+        ))
     }
 
     /// True iff both BVN and NIN have `verified` rows for this owner.

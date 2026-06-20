@@ -27,16 +27,19 @@ pub struct NotificationService {
 
 impl NotificationService {
     pub fn new() -> Self {
-        let smtp_host = std::env::var("SMTP_HOST").unwrap_or_default(); let smtp_user = std::env::var("SMTP_USERNAME").unwrap_or_default(); let smtp_pass = std::env::var("SMTP_PASSWORD").unwrap_or_default(); let smtp_port: u16 = std::env::var("SMTP_PORT")
+        let smtp_host = std::env::var("SMTP_HOST").unwrap_or_default();
+        let smtp_user = std::env::var("SMTP_USERNAME").unwrap_or_default();
+        let smtp_pass = std::env::var("SMTP_PASSWORD").unwrap_or_default();
+        let smtp_port: u16 = std::env::var("SMTP_PORT")
             .ok()
-            .and_then(|v| v.parse(). ok())
+            .and_then(|v| v.parse().ok())
             .unwrap_or(587);
         let from_email = std::env::var("SMTP_FROM_EMAIL")
             .unwrap_or_else(|_| "noreply@nexuscare.com".to_string());
-        let from_name = std::env::var("SMTP_FROM_NAME")
-            .unwrap_or_else(|_| "NexusCare".to_string());
+        let from_name = std::env::var("SMTP_FROM_NAME").unwrap_or_else(|_| "NexusCare".to_string());
 
-        let mock = smtp_host.is_empty() || smtp_user.is_empty() || smtp_pass.is_empty(); let smtp = if !mock {
+        let mock = smtp_host.is_empty() || smtp_user.is_empty() || smtp_pass.is_empty();
+        let smtp = if !mock {
             let creds = Credentials::new(smtp_user, smtp_pass);
             AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&smtp_host)
                 .ok()
@@ -46,11 +49,15 @@ impl NotificationService {
             None
         };
 
-        Self { smtp, from_email, from_name, mock }
+        Self {
+            smtp,
+            from_email,
+            from_name,
+            mock,
+        }
     }
 
     /// Send an email with optional HTML. In mock mode, logs instead of sending
-
 
     pub async fn send_email_message(
         &self,
@@ -71,20 +78,29 @@ impl NotificationService {
 
         let from = format!("{} <{}>", self.from_name, self.from_email);
         let builder = Message::builder()
-            .from(from.parse(). map_err(|e| NotificationError::EmailFailed(format!("{}", e)))?)
-            .to(to.parse(). map_err(|e| NotificationError::EmailFailed(format!("{}", e)))?)
+            .from(
+                from.parse()
+                    .map_err(|e| NotificationError::EmailFailed(format!("{}", e)))?,
+            )
+            .to(to
+                .parse()
+                .map_err(|e| NotificationError::EmailFailed(format!("{}", e)))?)
             .subject(subject);
 
         let email = match html_body {
             Some(html) => builder
                 .multipart(
                     MultiPart::alternative()
-                        .singlepart(SinglePart::builder()
-                            .header(ContentType::TEXT_PLAIN)
-                            .body(text_body.to_string()))
-                        .singlepart(SinglePart::builder()
-                            .header(ContentType::TEXT_HTML)
-                            .body(html.to_string())),
+                        .singlepart(
+                            SinglePart::builder()
+                                .header(ContentType::TEXT_PLAIN)
+                                .body(text_body.to_string()),
+                        )
+                        .singlepart(
+                            SinglePart::builder()
+                                .header(ContentType::TEXT_HTML)
+                                .body(html.to_string()),
+                        ),
                 )
                 .map_err(|e| NotificationError::EmailFailed(e.to_string()))?,
             None => builder
@@ -105,7 +121,6 @@ impl NotificationService {
 
     /// Send a plain-text email. In mock mode, logs instead of sending
 
-
     pub async fn send_email(
         &self,
         to: &str,
@@ -114,7 +129,6 @@ impl NotificationService {
     ) -> Result<(), NotificationError> {
         self.send_email_message(to, subject, body, None).await
     }
-
 
     /// Send push notification (stub — wire FCM when ready)
     #[allow(dead_code)]
@@ -126,7 +140,9 @@ impl NotificationService {
     ) -> Result<(), NotificationError> {
         tracing::info!(
             "[PUSH] hospital={} title={} message={}",
-            hospital_id, title, message
+            hospital_id,
+            title,
+            message
         );
         Ok(())
     }
@@ -140,20 +156,22 @@ impl NotificationService {
     ) -> Result<(), NotificationError> {
         tracing::info!(
             "[SHIFT BROADCAST] shift_id={} hospital_id={} matched_clinicians={}",
-            shift_id, hospital_id, matched_count
+            shift_id,
+            hospital_id,
+            matched_count
         );
 
         // In production, this would:
-        
+
         // Mock implementation
         tracing::info!(
             "Push notifications sent to {} eligible workers for shift {}",
-            matched_count, shift_id
+            matched_count,
+            shift_id
         );
 
         Ok(())
     }
-
 }
 
 impl Default for NotificationService {

@@ -1,17 +1,17 @@
 use anyhow::Context;
 use sqlx::postgres::PgPoolOptions;
 use std::net::SocketAddr;
-use std::sync::Arc;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use nexuscare_backend::utils::AppConfig;
-use nexuscare_backend::routes;
 use nexuscare_backend::repositories::EmailOutboxRepository;
+use nexuscare_backend::routes;
 use nexuscare_backend::schedulers::{
     BroadcastScheduler, HandoverAutoApprovalScheduler, OfferExpiryScheduler, PayoutScheduler,
 };
 use nexuscare_backend::services::{EmailOutboxService, EmailOutboxWorker, NotificationService};
+use nexuscare_backend::utils::AppConfig;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -21,7 +21,8 @@ async fn main() -> anyhow::Result<()> {
         if let Err(err2) = dotenvy::from_filename_override(".env") {
             tracing::warn!(
                 "Failed to load .env from {}: {}; also failed from CWD: {}",
-                manifest_env.display(), err,
+                manifest_env.display(),
+                err,
                 err2
             );
         }
@@ -29,8 +30,10 @@ async fn main() -> anyhow::Result<()> {
 
     // Initialize tracing
     tracing_subscriber::registry()
-        .with(tracing_subscriber::EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| "nexuscare_backend=debug,tower_http=debug".into()))
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "nexuscare_backend=debug,tower_http=debug".into()),
+        )
         .with(tracing_subscriber::fmt::layer())
         .init();
 
@@ -56,16 +59,15 @@ async fn main() -> anyhow::Result<()> {
     let email_outbox_repo = Arc::new(EmailOutboxRepository::new(pool.clone()));
     let email_outbox_service = Arc::new(EmailOutboxService::new(
         email_outbox_repo,
-        notification_service.clone(), ));
+        notification_service.clone(),
+    ));
 
     let worker = EmailOutboxWorker::new(email_outbox_service.clone());
     tokio::spawn(worker.run());
 
     // Build the application router (also returns the AppState so we can
-    let (app, state) = routes::create_router(
-        pool.clone(), notification_service,
-        email_outbox_service,
-    );
+    let (app, state) =
+        routes::create_router(pool.clone(), notification_service, email_outbox_service);
 
     // re-broadcast cadence sweep (STAT every 15 min, Urgent every
     let broadcast_scheduler = BroadcastScheduler::new(state.shift_service.clone());

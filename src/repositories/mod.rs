@@ -1,18 +1,18 @@
-pub mod hospital;
-pub mod location;
-pub mod billing;
 pub mod audit;
+pub mod billing;
 pub mod clinician;
+pub mod email_outbox;
+pub mod hospital;
+pub mod identity_verification;
+pub mod location;
 pub mod shift;
 pub mod wallet;
-pub mod email_outbox;
-pub mod identity_verification;
 
-pub use hospital::HospitalRepository;
-pub use location::LocationRepository;
-pub use billing::BillingRepository;
 pub use audit::AuditRepository;
-pub use clinician::{ClinicianRepository, ClinicianRepoError};
-pub use wallet::{WalletRepoError, WalletRepository};
+pub use billing::BillingRepository;
+pub use clinician::{ClinicianRepoError, ClinicianRepository};
 pub use email_outbox::EmailOutboxRepository;
+pub use hospital::HospitalRepository;
 pub use identity_verification::{IdentityRepoError, IdentityVerificationRepository};
+pub use location::LocationRepository;
+pub use wallet::{WalletRepoError, WalletRepository};

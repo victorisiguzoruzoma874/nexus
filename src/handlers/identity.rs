@@ -1,13 +1,11 @@
 use axum::{extract::State, Json};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use uuid::Uuid;
 use utoipa::ToSchema;
+use uuid::Uuid;
 
 use crate::routes::AppState;
-use crate::services::identity_verification_service::{
-    IdentityError, IdentityKind, IdentityOwner,
-};
+use crate::services::identity_verification_service::{IdentityError, IdentityKind, IdentityOwner};
 use crate::utils::errors::{AppError, AppResult};
 
 #[derive(Debug, Deserialize, ToSchema)]

@@ -73,7 +73,7 @@ impl EmailOutboxRepository {
             r#"
             UPDATE email_outbox
             SET status = 'sent',
-                sent_at = NOW, updated_at = NOW()
+                sent_at = NOW(), updated_at = NOW()
             WHERE id = $1
             "#,
         )

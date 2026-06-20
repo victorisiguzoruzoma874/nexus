@@ -26,7 +26,7 @@ pub fn require_role(
                 Ok(c) => c,
                 Err(_) => return reject(StatusCode::UNAUTHORIZED, "Missing or invalid token"),
             };
-            if !allowed.iter(). any(|r| r == &claims.role) {
+            if !allowed.iter().any(|r| r == &claims.role) {
                 return reject(StatusCode::FORBIDDEN, "Insufficient role for this endpoint");
             }
             next.run(req).await

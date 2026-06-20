@@ -145,7 +145,9 @@ impl AuthService {
                 .await?;
 
         // Silently succeed if email not found (don't leak user existence)
-        let Some((user_id,)) = user else { return Ok(()) };
+        let Some((user_id,)) = user else {
+            return Ok(());
+        };
 
         let raw_token = Uuid::new_v4().to_string();
         let token_hash = sha256_hex(&raw_token);
@@ -161,8 +163,8 @@ impl AuthService {
         .execute(&self.pool)
         .await?;
 
-        let api_base = std::env::var("API_BASE_URL")
-            .unwrap_or_else(|_| "http://localhost:8080".to_string());
+        let api_base =
+            std::env::var("API_BASE_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
         let reset_link = format!("{}/reset-password?token={}", api_base, raw_token);
 
         let content = email_templates::password_reset(&reset_link);
@@ -192,10 +194,10 @@ impl AuthService {
             return Err(AuthError::InvalidToken);
         }
 
-        let password_hash = hash_password(new_password)
-            .map_err(|e| AuthError::Internal(e.to_string()))?;
+        let password_hash =
+            hash_password(new_password).map_err(|e| AuthError::Internal(e.to_string()))?;
 
-        let mut tx = self.pool.begin(). await?;
+        let mut tx = self.pool.begin().await?;
 
         sqlx::query("UPDATE users SET password_hash = $1 WHERE id = $2")
             .bind(&password_hash)
@@ -208,7 +210,7 @@ impl AuthService {
             .execute(&mut *tx)
             .await?;
 
-        tx.commit(). await?;
+        tx.commit().await?;
         Ok(())
     }
 
@@ -258,8 +260,8 @@ impl AuthService {
             .execute(&self.pool)
             .await?;
 
-        let (access_token, expiry_secs) = issue_access_token(&user)
-            .map_err(|e| AuthError::Internal(e))?;
+        let (access_token, expiry_secs) =
+            issue_access_token(&user).map_err(|e| AuthError::Internal(e))?;
 
         let refresh_token = self.issue_refresh_token(user.id).await?;
 
@@ -274,7 +276,8 @@ impl AuthService {
         Ok(LoginResponse {
             access_token,
             refresh_token,
-            token_type: "Bearer".to_string(), expires_in: expiry_secs,
+            token_type: "Bearer".to_string(),
+            expires_in: expiry_secs,
             redirect_to,
             user: UserResponse::from(user),
         })
@@ -285,7 +288,7 @@ impl AuthService {
         let token_hash = sha256_hex(&raw);
         let days: i64 = std::env::var("JWT_REFRESH_EXPIRY_DAYS")
             .ok()
-            .and_then(|v| v.parse(). ok())
+            .and_then(|v| v.parse().ok())
             .unwrap_or(30);
         let expires_at = Utc::now() + Duration::days(days);
 
@@ -347,18 +350,22 @@ fn issue_access_token(user: &User) -> Result<(String, u64), String> {
     }
     let expiry_hours: u64 = std::env::var("JWT_EXPIRY_HOURS")
         .ok()
-        .and_then(|v| v.parse(). ok())
+        .and_then(|v| v.parse().ok())
         .unwrap_or(24);
 
     let now = Utc::now().timestamp() as usize;
     let claims = Claims {
-        sub: user.id.to_string(), email: user.email.clone(), role: user.role.clone(), hospital_id: user.hospital_id.map(|id| id.to_string()),
+        sub: user.id.to_string(),
+        email: user.email.clone(),
+        role: user.role.clone(),
+        hospital_id: user.hospital_id.map(|id| id.to_string()),
         exp: now + (expiry_hours as usize * 3600),
         iat: now,
     };
 
     let token = encode(
-        &Header::default(), &claims,
+        &Header::default(),
+        &claims,
         &EncodingKey::from_secret(jwt_secret.as_bytes()),
     )
     .map_err(|e| e.to_string())?;

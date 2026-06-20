@@ -7,12 +7,12 @@ use uuid::Uuid;
 use validator::Validate;
 
 use crate::{
+    models::hospital::{
+        CreateHospitalRequest, Hospital, HospitalResponse, RegistrationStep, UpdateHospitalRequest,
+        VerificationStatus,
+    },
     routes::AppState,
     utils::errors::{AppError, AppResult},
-    models::hospital::{
-        CreateHospitalRequest, Hospital, HospitalResponse, RegistrationStep,
-        UpdateHospitalRequest, VerificationStatus,
-    },
 };
 
 /// POST /api/v1/hospitals
@@ -21,20 +21,22 @@ pub async fn create_hospital(
     State(state): State<AppState>,
     Json(payload): Json<CreateHospitalRequest>,
 ) -> AppResult<(StatusCode, Json<HospitalResponse>)> {
-    payload.validate(). map_err(|e| AppError::Validation(e.to_string()))?;
+    payload
+        .validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
 
     // Check for duplicate registration number or email
-    let existing: Option<(Uuid,)> = sqlx::query_as(
-        "SELECT id FROM hospitals WHERE registration_number = $1 OR email = $2",
-    )
-    .bind(&payload.registration_number)
-    .bind(&payload.email)
-    .fetch_optional(&state.pool)
-    .await?;
+    let existing: Option<(Uuid,)> =
+        sqlx::query_as("SELECT id FROM hospitals WHERE registration_number = $1 OR email = $2")
+            .bind(&payload.registration_number)
+            .bind(&payload.email)
+            .fetch_optional(&state.pool)
+            .await?;
 
     if existing.is_some() {
         return Err(AppError::Conflict(
-            "A hospital with this registration number or email already exists".to_string(), ));
+            "A hospital with this registration number or email already exists".to_string(),
+        ));
     }
 
     let hospital: Hospital = sqlx::query_as(
@@ -77,7 +79,8 @@ pub async fn get_hospital(
     .fetch_optional(&state.pool)
     .await?;
 
-    let hospital = hospital.ok_or_else(|| AppError::NotFound(format!("Hospital {} not found", id)))?;
+    let hospital =
+        hospital.ok_or_else(|| AppError::NotFound(format!("Hospital {} not found", id)))?;
     Ok(Json(HospitalResponse::from(hospital)))
 }
 
@@ -87,7 +90,9 @@ pub async fn update_hospital(
     Path(id): Path<Uuid>,
     Json(payload): Json<UpdateHospitalRequest>,
 ) -> AppResult<Json<HospitalResponse>> {
-    payload.validate(). map_err(|e| AppError::Validation(e.to_string()))?;
+    payload
+        .validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
 
     let hospital: Option<Hospital> = sqlx::query_as(
         r#"
@@ -113,7 +118,8 @@ pub async fn update_hospital(
     .fetch_optional(&state.pool)
     .await?;
 
-    let hospital = hospital.ok_or_else(|| AppError::NotFound(format!("Hospital {} not found", id)))?;
+    let hospital =
+        hospital.ok_or_else(|| AppError::NotFound(format!("Hospital {} not found", id)))?;
     Ok(Json(HospitalResponse::from(hospital)))
 }
 
@@ -124,21 +130,23 @@ pub async fn advance_registration_step(
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<HospitalResponse>> {
     // Fetch current step
-    let row: Option<(RegistrationStep,)> = sqlx::query_as(
-        "SELECT registration_step FROM hospitals WHERE id = $1",
-    )
-    .bind(id)
-    .fetch_optional(&state.pool)
-    .await?;
+    let row: Option<(RegistrationStep,)> =
+        sqlx::query_as("SELECT registration_step FROM hospitals WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&state.pool)
+            .await?;
 
-    let (current_step,) = row.ok_or_else(|| AppError::NotFound(format!("Hospital {} not found", id)))?;
+    let (current_step,) =
+        row.ok_or_else(|| AppError::NotFound(format!("Hospital {} not found", id)))?;
 
     let next_step = match current_step {
         RegistrationStep::ProfileSetup => RegistrationStep::Credentials,
         RegistrationStep::Credentials => RegistrationStep::Verification,
         RegistrationStep::Verification => RegistrationStep::AccessGranted,
         RegistrationStep::AccessGranted => {
-            return Err(AppError::Conflict("Registration is already complete".to_string()));
+            return Err(AppError::Conflict(
+                "Registration is already complete".to_string(),
+            ));
         }
     };
 
@@ -175,5 +183,7 @@ pub async fn list_hospitals(
     .fetch_all(&state.pool)
     .await?;
 
-    Ok(Json(hospitals.into_iter(). map(HospitalResponse::from).collect()))
+    Ok(Json(
+        hospitals.into_iter().map(HospitalResponse::from).collect(),
+    ))
 }

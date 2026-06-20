@@ -1,12 +1,12 @@
+use chrono::{Duration, Utc};
 use sqlx::{FromRow, PgPool, Postgres, Transaction};
 use uuid::Uuid;
-use chrono::{Duration, Utc};
 
-use crate::models::shift::{
-    Shift, ShiftStatus, CreateShiftRequest, PayType, ShiftApplication,
-    ShiftApplicationStatus, ShiftPriority, ShiftType,
-};
 use crate::models::registration::RegistrationStatus;
+use crate::models::shift::{
+    CreateShiftRequest, PayType, Shift, ShiftApplication, ShiftApplicationStatus, ShiftPriority,
+    ShiftStatus, ShiftType,
+};
 
 /// Raw row backing the ranking query. Internal to the repo —
 #[derive(Debug, Clone, FromRow)]
@@ -84,7 +84,10 @@ impl ShiftRepository {
     }
 
     /// Get hospital name by ID
-    pub async fn get_hospital_name(&self, hospital_id: Uuid) -> Result<Option<String>, sqlx::Error> {
+    pub async fn get_hospital_name(
+        &self,
+        hospital_id: Uuid,
+    ) -> Result<Option<String>, sqlx::Error> {
         sqlx::query_scalar::<_, String>(
             r#"
             SELECT name
@@ -147,7 +150,6 @@ impl ShiftRepository {
     }
 
     /// Get the hospital's first registered location coordinates
-
 
     pub async fn get_hospital_coordinates(
         &self,
@@ -225,7 +227,6 @@ impl ShiftRepository {
 
     /// Accept an offer inside a transaction
 
-
     pub async fn accept_offer_tx(
         &self,
         tx: &mut Transaction<'_, Postgres>,
@@ -275,7 +276,6 @@ impl ShiftRepository {
 
     /// Mark the shift assigned and stamp the chosen clinician
 
-
     pub async fn assign_shift_to_clinician_tx(
         &self,
         tx: &mut Transaction<'_, Postgres>,
@@ -299,7 +299,6 @@ impl ShiftRepository {
     }
 
     /// Decline an offer
-
 
     pub async fn decline_offer(
         &self,
@@ -491,7 +490,7 @@ impl ShiftRepository {
             )
             VALUES (
                 $1, $2, $3, $4, $5, $6,
-                NOW, NOW() + INTERVAL '1 hour', NOW() + INTERVAL '48 hours'
+                NOW(), NOW() + INTERVAL '1 hour', NOW() + INTERVAL '48 hours'
             )
             ON CONFLICT (shift_id) DO UPDATE
               SET patients_seen     = EXCLUDED.patients_seen,
@@ -518,7 +517,6 @@ impl ShiftRepository {
     }
 
     /// Fetch the existing handover row, if any
-
 
     pub async fn get_handover(
         &self,
@@ -557,7 +555,6 @@ impl ShiftRepository {
     }
 
     /// Read clockout_at to enforce the 24-hour revision window
-
 
     pub async fn get_attendance_clockout(
         &self,
@@ -634,10 +631,7 @@ impl ShiftRepository {
 
     /// Hospital explicitly approves the handover, unlocking the
 
-    pub async fn approve_handover(
-        &self,
-        shift_id: Uuid,
-    ) -> Result<u64, sqlx::Error> {
+    pub async fn approve_handover(&self, shift_id: Uuid) -> Result<u64, sqlx::Error> {
         let res = sqlx::query(
             r#"
             UPDATE shift_handovers
@@ -733,11 +727,23 @@ impl ShiftRepository {
         &self,
         rating_id: Uuid,
     ) -> Result<Option<(crate::models::shift::RatingResponse, Uuid)>, sqlx::Error> {
-        let row = sqlx::query_as::<_, (
-            Uuid, Uuid, Uuid, String, i16, Option<serde_json::Value>,
-            Option<String>, bool, chrono::DateTime<chrono::Utc>,
-            chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>, Uuid,
-        )>(
+        let row = sqlx::query_as::<
+            _,
+            (
+                Uuid,
+                Uuid,
+                Uuid,
+                String,
+                i16,
+                Option<serde_json::Value>,
+                Option<String>,
+                bool,
+                chrono::DateTime<chrono::Utc>,
+                chrono::DateTime<chrono::Utc>,
+                chrono::DateTime<chrono::Utc>,
+                Uuid,
+            ),
+        >(
             r#"
             SELECT id, shift_id, ratee_id, ratee_kind::text,
                    score, dimensions, comment, is_anonymous,
@@ -750,22 +756,24 @@ impl ShiftRepository {
         .fetch_optional(&self.pool)
         .await?;
 
-        Ok(row.map(|t| (
-            crate::models::shift::RatingResponse {
-                id: t.0,
-                shift_id: t.1,
-                ratee_id: t.2,
-                ratee_kind: t.3,
-                score: t.4,
-                dimensions: t.5,
-                comment: t.6,
-                is_anonymous: t.7,
-                editable_until: t.8,
-                window_closes_at: t.9,
-                created_at: t.10,
-            },
-            t.11,
-        )))
+        Ok(row.map(|t| {
+            (
+                crate::models::shift::RatingResponse {
+                    id: t.0,
+                    shift_id: t.1,
+                    ratee_id: t.2,
+                    ratee_kind: t.3,
+                    score: t.4,
+                    dimensions: t.5,
+                    comment: t.6,
+                    is_anonymous: t.7,
+                    editable_until: t.8,
+                    window_closes_at: t.9,
+                    created_at: t.10,
+                },
+                t.11,
+            )
+        }))
     }
 
     /// Recompute the clinician's cached average rating after a
@@ -853,7 +861,17 @@ impl ShiftRepository {
         &self,
         clinician_id: Uuid,
     ) -> Result<Vec<crate::models::shift::MyApplicationEntry>, sqlx::Error> {
-        let interests = sqlx::query_as::<_, (Uuid, Uuid, String, chrono::DateTime<chrono::Utc>, ShiftStatus, chrono::DateTime<chrono::Utc>)>(
+        let interests = sqlx::query_as::<
+            _,
+            (
+                Uuid,
+                Uuid,
+                String,
+                chrono::DateTime<chrono::Utc>,
+                ShiftStatus,
+                chrono::DateTime<chrono::Utc>,
+            ),
+        >(
             r#"
             SELECT s.id, s.hospital_id, s.role_title, s.scheduled_start,
                    s.status AS "status: _", si.expressed_at AS created_at
@@ -866,7 +884,18 @@ impl ShiftRepository {
         .fetch_all(&self.pool)
         .await?;
 
-        let applications = sqlx::query_as::<_, (Uuid, Uuid, String, chrono::DateTime<chrono::Utc>, ShiftStatus, ShiftApplicationStatus, chrono::DateTime<chrono::Utc>)>(
+        let applications = sqlx::query_as::<
+            _,
+            (
+                Uuid,
+                Uuid,
+                String,
+                chrono::DateTime<chrono::Utc>,
+                ShiftStatus,
+                ShiftApplicationStatus,
+                chrono::DateTime<chrono::Utc>,
+            ),
+        >(
             r#"
             SELECT s.id, s.hospital_id, s.role_title, s.scheduled_start,
                    s.status AS "status: _",
@@ -883,24 +912,31 @@ impl ShiftRepository {
 
         let mut rows: Vec<crate::models::shift::MyApplicationEntry> = interests
             .into_iter()
-            .map(|(sid, hid, title, start, status, created)| crate::models::shift::MyApplicationEntry {
-                shift_id: sid,
-                hospital_id: hid,
-                role_title: title,
-                scheduled_start: start,
-                shift_status: status,
-                kind: "interest".to_string(), application_status: None,
-                created_at: created,
+            .map(|(sid, hid, title, start, status, created)| {
+                crate::models::shift::MyApplicationEntry {
+                    shift_id: sid,
+                    hospital_id: hid,
+                    role_title: title,
+                    scheduled_start: start,
+                    shift_status: status,
+                    kind: "interest".to_string(),
+                    application_status: None,
+                    created_at: created,
+                }
             })
-            .collect(); rows.extend(applications.into_iter(). map(
-            |(sid, hid, title, start, status, app_status, created)| crate::models::shift::MyApplicationEntry {
-                shift_id: sid,
-                hospital_id: hid,
-                role_title: title,
-                scheduled_start: start,
-                shift_status: status,
-                kind: "application".to_string(), application_status: Some(app_status),
-                created_at: created,
+            .collect();
+        rows.extend(applications.into_iter().map(
+            |(sid, hid, title, start, status, app_status, created)| {
+                crate::models::shift::MyApplicationEntry {
+                    shift_id: sid,
+                    hospital_id: hid,
+                    role_title: title,
+                    scheduled_start: start,
+                    shift_status: status,
+                    kind: "application".to_string(),
+                    application_status: Some(app_status),
+                    created_at: created,
+                }
             },
         ));
 
@@ -930,7 +966,6 @@ impl ShiftRepository {
     }
 
     /// Insert a bookmark. Idempotent via the unique constraint
-
 
     pub async fn bookmark_shift(
         &self,
@@ -1054,13 +1089,11 @@ impl ShiftRepository {
 
     /// Find open shifts that are due for re-broadcast per their
 
-    pub async fn find_shifts_due_for_rebroadcast(
-        &self,
-    ) -> Result<Vec<Shift>, sqlx::Error> {
+    pub async fn find_shifts_due_for_rebroadcast(&self) -> Result<Vec<Shift>, sqlx::Error> {
         sqlx::query_as::<_, Shift>(
             r#"
             SELECT s.id, s.hospital_id, s.role_category, s.role_title, s.specialty,
-                   s.department, s.shift_type, s.status(), s.priority, s.urgency_bonus_pct,
+                   s.department, s.shift_type, s.status, s.priority, s.urgency_bonus_pct,
                    s.scheduled_start, s.duration_hours, s.scheduled_end,
                    s.assigned_clinician_id, s.rate_kobo_per_hour, s.fixed_rate_kobo,
                    s.pay_type, s.stat_bonus_kobo, s.effective_rate_kobo_per_hour,
@@ -1091,9 +1124,7 @@ impl ShiftRepository {
 
     /// Sweep step: flip every offered assignment whose
 
-    pub async fn expire_due_offers(
-        &self,
-    ) -> Result<Vec<(Uuid, Uuid, Uuid, String)>, sqlx::Error> {
+    pub async fn expire_due_offers(&self) -> Result<Vec<(Uuid, Uuid, Uuid, String)>, sqlx::Error> {
         sqlx::query_as::<_, (Uuid, Uuid, Uuid, String)>(
             r#"
             WITH expired AS (
@@ -1204,7 +1235,6 @@ impl ShiftRepository {
     }
 
     /// Free-text qualifications attached to a clinician profile
-
 
     pub async fn list_clinician_qualifications(
         &self,
@@ -1362,8 +1392,9 @@ impl ShiftRepository {
         request: CreateShiftRequest,
     ) -> Result<Shift, sqlx::Error> {
         let id = Uuid::new_v4();
-        let scheduled_end = request.scheduled_start + Duration::hours(request.duration_hours as i64);
-        
+        let scheduled_end =
+            request.scheduled_start + Duration::hours(request.duration_hours as i64);
+
         // Calculate effective rate and grand total
         let (effective_rate, grand_total) = self.calculate_compensation(&request);
 
@@ -1455,7 +1486,7 @@ impl ShiftRepository {
             SELECT
                 s.id, s.hospital_id, h.name as hospital_name,
                 s.role_category, s.role_title, s.specialty, s.department,
-                s.shift_type, s.status(), s.priority, s.urgency_bonus_pct,
+                s.shift_type, s.status, s.priority, s.urgency_bonus_pct,
                 s.scheduled_start, s.duration_hours, s.scheduled_end,
                 s.actual_start, s.actual_end, s.assigned_clinician_id,
                 s.rate_kobo_per_hour, s.fixed_rate_kobo, s.pay_type, s.stat_bonus_kobo,
@@ -1485,7 +1516,7 @@ impl ShiftRepository {
                 SELECT
                     s.id, s.hospital_id, h.name as hospital_name,
                     s.role_category, s.role_title, s.specialty, s.department,
-                    s.shift_type, s.status(), s.priority, s.urgency_bonus_pct,
+                    s.shift_type, s.status, s.priority, s.urgency_bonus_pct,
                     s.scheduled_start, s.duration_hours, s.scheduled_end,
                     s.actual_start, s.actual_end, s.assigned_clinician_id,
                     s.rate_kobo_per_hour, s.fixed_rate_kobo, s.pay_type, s.stat_bonus_kobo,
@@ -1511,7 +1542,7 @@ impl ShiftRepository {
                 SELECT
                     s.id, s.hospital_id, h.name as hospital_name,
                     s.role_category, s.role_title, s.specialty, s.department,
-                    s.shift_type, s.status(), s.priority, s.urgency_bonus_pct,
+                    s.shift_type, s.status, s.priority, s.urgency_bonus_pct,
                     s.scheduled_start, s.duration_hours, s.scheduled_end,
                     s.actual_start, s.actual_end, s.assigned_clinician_id,
                     s.rate_kobo_per_hour, s.fixed_rate_kobo, s.pay_type, s.stat_bonus_kobo,
@@ -1650,10 +1681,7 @@ impl ShiftRepository {
         .await
     }
 
-    pub async fn count_applications_for_shift(
-        &self,
-        shift_id: Uuid,
-    ) -> Result<i64, sqlx::Error> {
+    pub async fn count_applications_for_shift(&self, shift_id: Uuid) -> Result<i64, sqlx::Error> {
         sqlx::query_scalar::<_, i64>(
             r#"
             SELECT COUNT(*)
@@ -1799,7 +1827,7 @@ impl ShiftRepository {
             SELECT
                 s.id, s.hospital_id, h.name as hospital_name,
                 s.role_category, s.role_title, s.specialty, s.department,
-                s.shift_type, s.status(), s.priority, s.urgency_bonus_pct,
+                s.shift_type, s.status, s.priority, s.urgency_bonus_pct,
                 s.scheduled_start, s.duration_hours, s.scheduled_end,
                 s.actual_start, s.actual_end, s.assigned_clinician_id,
                 s.rate_kobo_per_hour, s.fixed_rate_kobo, s.pay_type, s.stat_bonus_kobo,
@@ -1860,7 +1888,7 @@ impl ShiftRepository {
         equipment: &[String],
         requirements: &[String],
     ) -> Result<(), sqlx::Error> {
-        for (idx, label) in tasks.iter(). enumerate() {
+        for (idx, label) in tasks.iter().enumerate() {
             sqlx::query(
                 r#"
                 INSERT INTO shift_description_items (shift_id, category, label, sort_order)
@@ -1874,7 +1902,7 @@ impl ShiftRepository {
             .await?;
         }
 
-        for (idx, label) in equipment.iter(). enumerate() {
+        for (idx, label) in equipment.iter().enumerate() {
             sqlx::query(
                 r#"
                 INSERT INTO shift_description_items (shift_id, category, label, sort_order)
@@ -1888,7 +1916,7 @@ impl ShiftRepository {
             .await?;
         }
 
-        for (idx, qualification) in requirements.iter(). enumerate() {
+        for (idx, qualification) in requirements.iter().enumerate() {
             sqlx::query(
                 r#"
                 INSERT INTO shift_requirements (shift_id, qualification, sort_order)
@@ -1907,22 +1935,20 @@ impl ShiftRepository {
 
     fn calculate_compensation(&self, request: &CreateShiftRequest) -> (Option<i64>, Option<i64>) {
         let base_amount = match request.pay_type {
-            PayType::HourlyRate => {
-                request.rate_kobo_per_hour.map(|rate| (rate as f64 * request.duration_hours as f64) as i64)
-            }
+            PayType::HourlyRate => request
+                .rate_kobo_per_hour
+                .map(|rate| (rate as f64 * request.duration_hours as f64) as i64),
             PayType::FixedRate => request.fixed_rate_kobo,
         };
 
         let effective_rate = match request.pay_type {
-            PayType::HourlyRate => {
-                request.rate_kobo_per_hour.map(|rate| {
-                    if let Some(bonus_pct) = request.urgency_bonus_pct {
-                        rate + (rate * bonus_pct as i64 / 100)
-                    } else {
-                        rate
-                    }
-                })
-            }
+            PayType::HourlyRate => request.rate_kobo_per_hour.map(|rate| {
+                if let Some(bonus_pct) = request.urgency_bonus_pct {
+                    rate + (rate * bonus_pct as i64 / 100)
+                } else {
+                    rate
+                }
+            }),
             PayType::FixedRate => None,
         };
 

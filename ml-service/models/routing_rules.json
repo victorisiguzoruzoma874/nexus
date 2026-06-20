@@ -1,0 +1,23 @@
+{
+  "disease_to_department": {
+    "MentalHealth": "Psychiatry",
+    "Genetic": "Genetics",
+    "Infectious": "Infectious Disease",
+    "Chronic": "General Medicine"
+  },
+  "category_override": {
+    "Child": "Paediatrics",
+    "Elderly": "Geriatrics"
+  },
+  "severity_to_priority": {
+    "Critical": 1,
+    "Severe": 2,
+    "Moderate": 3,
+    "Mild": 3
+  },
+  "priority_to_route": {
+    "1": "emergency",
+    "2": "specialist",
+    "3": "gp"
+  }
+}

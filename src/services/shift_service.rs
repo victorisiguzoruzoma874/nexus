@@ -1,25 +1,25 @@
-use std::sync::Arc;
+use chrono::{Duration, Utc};
 use sqlx::PgPool;
+use std::sync::Arc;
 use uuid::Uuid;
-use chrono::{Utc, Duration};
 
-use crate::models::shift::{Shift, CreateShiftRequest, ShiftType, ShiftPriority, ShiftStatus};
+use crate::models::shift::{CreateShiftRequest, Shift, ShiftPriority, ShiftStatus, ShiftType};
 use crate::repositories::shift::ShiftRepository;
-use crate::services::notification_service::NotificationService;
 use crate::services::email_outbox_service::EmailOutboxService;
 use crate::services::email_templates;
+use crate::services::notification_service::NotificationService;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ShiftServiceError {
     #[error("Validation failed: {0}")]
     ValidationError(String),
-    
+
     #[error("Database error: {0}")]
     DatabaseError(#[from] sqlx::Error),
-    
+
     #[error("Shift not found: {0}")]
     NotFound(Uuid),
-    
+
     #[error("Duplicate shift: {0}")]
     DuplicateShift(String),
 
@@ -43,7 +43,7 @@ pub enum ShiftServiceError {
 
     #[error("Invalid shift status: {0}")]
     InvalidStatus(String),
-    
+
     #[error("Hospital not approved: {0}")]
     HospitalNotApproved(String),
 
@@ -191,22 +191,31 @@ impl ShiftService {
         let equipment = std::mem::take(&mut request.equipment);
         let requirements = std::mem::take(&mut request.requirements);
 
-        let mut tx = self.pool.begin(). await?;
+        let mut tx = self.pool.begin().await?;
 
         // Create shift
-        let shift = self.shift_repo.create(&mut tx, hospital_id, created_by, request).await?;
+        let shift = self
+            .shift_repo
+            .create(&mut tx, hospital_id, created_by, request)
+            .await?;
 
         // F1-F12 / F1-F13 / F1-F14 — persist atomically within the same tx.
         self.shift_repo
             .insert_shift_description_and_requirements(
-                &mut tx, shift.id, &tasks, &equipment, &requirements,
+                &mut tx,
+                shift.id,
+                &tasks,
+                &equipment,
+                &requirements,
             )
             .await?;
 
         // AC-04 / F1-F15: Generate virtual link for virtual shifts
         if shift.shift_type == ShiftType::Virtual {
             let virtual_link = self.generate_virtual_link(shift.id);
-            self.shift_repo.update_virtual_link(&mut tx, shift.id, &virtual_link).await?;
+            self.shift_repo
+                .update_virtual_link(&mut tx, shift.id, &virtual_link)
+                .await?;
         }
 
         // hospital must have wallet funds covering the gross
@@ -221,16 +230,21 @@ impl ShiftService {
                             required,
                             available,
                         },
-                    ) => ShiftServiceError::InsufficientWalletBalance { required, available },
+                    ) => ShiftServiceError::InsufficientWalletBalance {
+                        required,
+                        available,
+                    },
                     other => ShiftServiceError::WalletError(other.to_string()),
                 })?;
         }
 
         // Broadcast shift (calculate matching clinicians).
         let matched_count = self.calculate_matched_clinicians(&shift).await;
-        self.shift_repo.broadcast_shift(&mut tx, shift.id, matched_count).await?;
+        self.shift_repo
+            .broadcast_shift(&mut tx, shift.id, matched_count)
+            .await?;
 
-        tx.commit(). await?;
+        tx.commit().await?;
 
         // record the initial broadcast in the audit table so the
         let radius_km = self
@@ -249,7 +263,8 @@ impl ShiftService {
         }
 
         // Send push notifications to eligible workers
-        self.broadcast_shift_notifications(shift.id, hospital_id, matched_count).await?;
+        self.broadcast_shift_notifications(shift.id, hospital_id, matched_count)
+            .await?;
 
         if let Ok(Some((hospital_name, hospital_email))) =
             self.shift_repo.get_hospital_contact(hospital_id).await
@@ -259,7 +274,11 @@ impl ShiftService {
                 &shift.role_title,
                 shift.scheduled_start,
             );
-            if let Err(e) = self.email_outbox.enqueue_email(&hospital_email, &content).await {
+            if let Err(e) = self
+                .email_outbox
+                .enqueue_email(&hospital_email, &content)
+                .await
+            {
                 eprintln!("Warning: Failed to queue shift created email: {}", e);
             }
         }
@@ -305,7 +324,8 @@ impl ShiftService {
             .await?
             .ok_or(ShiftServiceError::NotFound(shift_id))?;
 
-        let is_waitlisted = shift.assigned_clinician_id.is_some(); let result = self
+        let is_waitlisted = shift.assigned_clinician_id.is_some();
+        let result = self
             .shift_repo
             .add_interest(shift_id, clinician_id, false, is_waitlisted)
             .await;
@@ -332,7 +352,8 @@ impl ShiftService {
 
         if shift.status != ShiftStatus::Open {
             return Err(ShiftServiceError::InvalidStatus(
-                "Shift is not open for applications".to_string(), ));
+                "Shift is not open for applications".to_string(),
+            ));
         }
 
         let profile = self
@@ -342,10 +363,13 @@ impl ShiftService {
             .ok_or(ShiftServiceError::ProfileIncomplete)?;
 
         let (first_name, last_name, license_number, role) = profile;
-        let profile_complete = !first_name.trim(). is_empty()
-            && !last_name.trim(). is_empty()
-            && license_number.as_ref(). map(|v| !v.trim(). is_empty()).unwrap_or(false)
-            && role.as_ref(). map(|v| !v.trim(). is_empty()).unwrap_or(false);
+        let profile_complete = !first_name.trim().is_empty()
+            && !last_name.trim().is_empty()
+            && license_number
+                .as_ref()
+                .map(|v| !v.trim().is_empty())
+                .unwrap_or(false)
+            && role.as_ref().map(|v| !v.trim().is_empty()).unwrap_or(false);
 
         if !profile_complete {
             return Err(ShiftServiceError::ProfileIncomplete);
@@ -361,10 +385,11 @@ impl ShiftService {
 
         let verified_applicant_name = format!("{} {}", first_name.trim(), last_name.trim())
             .trim()
-            .to_string(); let verified_license_number = license_number.expect("checked by profile_complete above");
+            .to_string();
+        let verified_license_number = license_number.expect("checked by profile_complete above");
         let verified_role = role.expect("checked by profile_complete above");
 
-        let mut tx = self.pool.begin(). await?;
+        let mut tx = self.pool.begin().await?;
         let result = self
             .shift_repo
             .create_application(
@@ -375,12 +400,13 @@ impl ShiftService {
                 &verified_license_number,
                 &verified_role,
                 request.years_experience,
-                request.experience_summary.as_deref(), )
+                request.experience_summary.as_deref(),
+            )
             .await;
 
         match result {
             Ok(_) => {
-                tx.commit(). await?;
+                tx.commit().await?;
                 Ok(())
             }
             Err(sqlx::Error::Database(db_err)) if db_err.is_unique_violation() => {
@@ -412,11 +438,15 @@ impl ShiftService {
             )));
         }
 
-        if self.shift_repo.clinician_has_active_assignment(clinician_id).await? {
+        if self
+            .shift_repo
+            .clinician_has_active_assignment(clinician_id)
+            .await?
+        {
             return Err(ShiftServiceError::ClinicianBusy);
         }
 
-        let mut tx = self.pool.begin(). await?;
+        let mut tx = self.pool.begin().await?;
         let updated = self
             .shift_repo
             .assign_clinician(&mut tx, shift_id, clinician_id, ShiftStatus::Upcoming)
@@ -424,7 +454,8 @@ impl ShiftService {
 
         if updated == 0 {
             return Err(ShiftServiceError::InvalidStatus(
-                "Shift is not open or already assigned".to_string(), ));
+                "Shift is not open or already assigned".to_string(),
+            ));
         }
 
         let _ = self
@@ -437,24 +468,38 @@ impl ShiftService {
             )
             .await;
 
-        tx.commit(). await?;
+        tx.commit().await?;
 
-        let hospital_contact = self.shift_repo.get_hospital_contact(shift.hospital_id).await.ok().flatten();
-        let clinician_contact = self.shift_repo.get_clinician_contact(clinician_id).await.ok().flatten();
+        let hospital_contact = self
+            .shift_repo
+            .get_hospital_contact(shift.hospital_id)
+            .await
+            .ok()
+            .flatten();
+        let clinician_contact = self
+            .shift_repo
+            .get_clinician_contact(clinician_id)
+            .await
+            .ok()
+            .flatten();
         let clinician_name = clinician_contact
             .as_ref()
-            .map(|(first, last, _)| format!("{} {}", first, last).trim(). to_string())
+            .map(|(first, last, _)| format!("{} {}", first, last).trim().to_string())
             .filter(|name| !name.is_empty())
             .unwrap_or_else(|| "Clinician".to_string());
 
         if let Some((_, _, clinician_email)) = clinician_contact {
             let content = email_templates::shift_assigned_clinician(
                 &clinician_name,
-                shift.hospital_name.as_deref(). unwrap_or("the hospital"),
+                shift.hospital_name.as_deref().unwrap_or("the hospital"),
                 &shift.role_title,
                 shift.scheduled_start,
             );
-            if let Err(e) = self.email_outbox.enqueue_email(&clinician_email, &content).await {
+            if let Err(e) = self
+                .email_outbox
+                .enqueue_email(&clinician_email, &content)
+                .await
+            {
                 eprintln!("Warning: Failed to queue clinician assignment email: {}", e);
             }
         }
@@ -466,7 +511,11 @@ impl ShiftService {
                 &shift.role_title,
                 shift.scheduled_start,
             );
-            if let Err(e) = self.email_outbox.enqueue_email(&hospital_email, &content).await {
+            if let Err(e) = self
+                .email_outbox
+                .enqueue_email(&hospital_email, &content)
+                .await
+            {
                 eprintln!("Warning: Failed to queue hospital assignment email: {}", e);
             }
         }
@@ -498,15 +547,13 @@ impl ShiftService {
             .get_hospital_coordinates(shift.hospital_id)
             .await?;
 
-        let rows = self
-            .shift_repo
-            .list_interested_with_stats(shift_id)
-            .await?;
+        let rows = self.shift_repo.list_interested_with_stats(shift_id).await?;
 
         // fetch the shift's required qualifications once. If the
         let required = self.shift_repo.list_shift_requirements(shift_id).await?;
         let required_lower: Vec<String> =
-            required.iter(). map(|s| s.trim(). to_lowercase()).collect(); let mut ranked: Vec<RankedInterestedClinician> = Vec::with_capacity(rows.len());
+            required.iter().map(|s| s.trim().to_lowercase()).collect();
+        let mut ranked: Vec<RankedInterestedClinician> = Vec::with_capacity(rows.len());
         for r in rows {
             let distance_km = match (hospital_coords, r.clinician_lat, r.clinician_lng) {
                 (Some((h_lat, h_lng)), Some(c_lat), Some(c_lng)) => {
@@ -541,10 +588,12 @@ impl ShiftService {
                     .shift_repo
                     .list_clinician_qualifications(r.clinician_id)
                     .await
-                    .unwrap_or_default(); let owned_lower: Vec<String> =
-                    owned.iter(). map(|s| s.trim(). to_lowercase()).collect(); required_lower
+                    .unwrap_or_default();
+                let owned_lower: Vec<String> =
+                    owned.iter().map(|s| s.trim().to_lowercase()).collect();
+                required_lower
                     .iter()
-                    .all(|req| owned_lower.iter(). any(|q| q.contains(req)))
+                    .all(|req| owned_lower.iter().any(|q| q.contains(req)))
             };
             let quals_score = if quals_match { 100.0 } else { 0.0 };
 
@@ -606,11 +655,8 @@ impl ShiftService {
         }
 
         // the clinician must have expressed interest in this shift.
-        let interested = self
-            .shift_repo
-            .list_interested_with_stats(shift_id)
-            .await?;
-        if !interested.iter(). any(|r| r.clinician_id == clinician_id) {
+        let interested = self.shift_repo.list_interested_with_stats(shift_id).await?;
+        if !interested.iter().any(|r| r.clinician_id == clinician_id) {
             return Err(ShiftServiceError::NotInterested);
         }
 
@@ -637,7 +683,11 @@ impl ShiftService {
                 shift.scheduled_start,
                 expires_at,
             );
-            if let Err(e) = self.email_outbox.enqueue_email(&clinician_email, &content).await {
+            if let Err(e) = self
+                .email_outbox
+                .enqueue_email(&clinician_email, &content)
+                .await
+            {
                 eprintln!("Warning: Failed to queue shift offer email: {}", e);
             }
         }
@@ -701,7 +751,7 @@ impl ShiftService {
             ShiftServiceError::ValidationError(format!("NDPR consent serialisation failed: {e}"))
         })?;
 
-        let mut tx = self.pool.begin(). await?;
+        let mut tx = self.pool.begin().await?;
         self.shift_repo
             .accept_offer_tx(&mut tx, assignment_id, &consent_json)
             .await?;
@@ -711,7 +761,7 @@ impl ShiftService {
         self.shift_repo
             .assign_shift_to_clinician_tx(&mut tx, shift_id, clinician_id)
             .await?;
-        tx.commit(). await?;
+        tx.commit().await?;
 
         // refresh the cached acceptance rate after the lifecycle
         if let Err(e) = self
@@ -723,8 +773,10 @@ impl ShiftService {
         }
 
         // Best-effort confirmation emails (one to hospital, one to clinician).
-        if let Ok(Some((hospital_name, hospital_email))) =
-            self.shift_repo.get_hospital_contact(shift.hospital_id).await
+        if let Ok(Some((hospital_name, hospital_email))) = self
+            .shift_repo
+            .get_hospital_contact(shift.hospital_id)
+            .await
         {
             if let Ok(Some((first_name, last_name, _email))) =
                 self.shift_repo.get_clinician_contact(clinician_id).await
@@ -736,7 +788,10 @@ impl ShiftService {
                     &shift.role_title,
                     shift.scheduled_start,
                 );
-                let _ = self.email_outbox.enqueue_email(&hospital_email, &content).await;
+                let _ = self
+                    .email_outbox
+                    .enqueue_email(&hospital_email, &content)
+                    .await;
             }
         }
         if let Ok(Some((first_name, _last_name, clinician_email))) =
@@ -755,7 +810,10 @@ impl ShiftService {
                 &shift.role_title,
                 shift.scheduled_start,
             );
-            let _ = self.email_outbox.enqueue_email(&clinician_email, &content).await;
+            let _ = self
+                .email_outbox
+                .enqueue_email(&clinician_email, &content)
+                .await;
         }
 
         Ok(assignment_id)
@@ -796,14 +854,20 @@ impl ShiftService {
 
         // Best-effort notification to the hospital admin.
         if let Ok(Some(shift)) = self.shift_repo.get_by_id(shift_id).await {
-            if let Ok(Some((_, hospital_email))) =
-                self.shift_repo.get_hospital_contact(shift.hospital_id).await
+            if let Ok(Some((_, hospital_email))) = self
+                .shift_repo
+                .get_hospital_contact(shift.hospital_id)
+                .await
             {
                 let content = email_templates::shift_offer_declined(
                     &shift.role_title,
                     shift.scheduled_start,
-                    reason.as_deref(), );
-                let _ = self.email_outbox.enqueue_email(&hospital_email, &content).await;
+                    reason.as_deref(),
+                );
+                let _ = self
+                    .email_outbox
+                    .enqueue_email(&hospital_email, &content)
+                    .await;
             }
         }
 
@@ -861,7 +925,8 @@ impl ShiftService {
             .shift_repo
             .clinician_has_active_assignment(clinician_id)
             .await?
-            && shift.status != ShiftStatus::Upcoming  // the current one doesn't count
+            && shift.status != ShiftStatus::Upcoming
+        // the current one doesn't count
         {
             // We allow the current shift even though it's 'assigned'/'upcoming';
         }
@@ -871,11 +936,13 @@ impl ShiftService {
             ClockinMethod::Gps => {
                 let lat = request.latitude.ok_or_else(|| {
                     ShiftServiceError::ValidationError(
-                        "latitude is required for GPS clock-in".to_string(), )
+                        "latitude is required for GPS clock-in".to_string(),
+                    )
                 })?;
                 let lng = request.longitude.ok_or_else(|| {
                     ShiftServiceError::ValidationError(
-                        "longitude is required for GPS clock-in".to_string(), )
+                        "longitude is required for GPS clock-in".to_string(),
+                    )
                 })?;
 
                 let (h_lat, h_lng) = self
@@ -884,7 +951,8 @@ impl ShiftService {
                     .await?
                     .ok_or_else(|| {
                         ShiftServiceError::InvalidStatus(
-                            "Hospital has no registered location".to_string(), )
+                            "Hospital has no registered location".to_string(),
+                        )
                     })?;
 
                 let radius_m = self
@@ -905,7 +973,8 @@ impl ShiftService {
             ClockinMethod::Virtual => {
                 if shift.shift_type != ShiftType::Virtual {
                     return Err(ShiftServiceError::ValidationError(
-                        "Virtual clock-in is only allowed for virtual shifts".to_string(), ));
+                        "Virtual clock-in is only allowed for virtual shifts".to_string(),
+                    ));
                 }
                 (None, None, None)
             }
@@ -922,11 +991,12 @@ impl ShiftService {
             }
             ClockinMethod::QrCode => {
                 return Err(ShiftServiceError::ValidationError(
-                    "QR-code clock-in is not yet supported via this endpoint".to_string(), ));
+                    "QR-code clock-in is not yet supported via this endpoint".to_string(),
+                ));
             }
         };
 
-        let mut tx = self.pool.begin(). await?;
+        let mut tx = self.pool.begin().await?;
         let attendance_id = self
             .shift_repo
             .record_clockin_tx(
@@ -941,7 +1011,7 @@ impl ShiftService {
                 late_penalty_applied,
             )
             .await?;
-        tx.commit(). await?;
+        tx.commit().await?;
 
         Ok(ClockinResponse {
             attendance_id,
@@ -983,7 +1053,10 @@ impl ShiftService {
         }
 
         // handover is editable for 1 hour after clock out. So both
-        if !matches!(shift.status, ShiftStatus::InProgress | ShiftStatus::Completed) {
+        if !matches!(
+            shift.status,
+            ShiftStatus::InProgress | ShiftStatus::Completed
+        ) {
             return Err(ShiftServiceError::InvalidStatus(format!(
                 "Handover can only be submitted for an in-progress or just-completed shift (current: {:?})",
                 shift.status
@@ -1010,7 +1083,8 @@ impl ShiftService {
                 &critical_patients,
                 &pending_tasks,
                 &request.instructions,
-                request.equipment_status.as_deref(), )
+                request.equipment_status.as_deref(),
+            )
             .await?;
 
         Ok(row)
@@ -1062,17 +1136,14 @@ impl ShiftService {
             })?;
 
         let now = Utc::now();
-        let worked_minutes = now
-            .signed_duration_since(clockin_at)
-            .num_minutes()
-            .max(0) as i32;
+        let worked_minutes = now.signed_duration_since(clockin_at).num_minutes().max(0) as i32;
 
-        let mut tx = self.pool.begin(). await?;
+        let mut tx = self.pool.begin().await?;
         let attendance_id = self
             .shift_repo
             .record_clockout_tx(&mut tx, shift_id, worked_minutes)
             .await?;
-        tx.commit(). await?;
+        tx.commit().await?;
 
         Ok(ClockoutResponse {
             attendance_id,
@@ -1090,9 +1161,10 @@ impl ShiftService {
         requester_user_id: Uuid,
         notes: String,
     ) -> Result<(), ShiftServiceError> {
-        if notes.trim(). is_empty() {
+        if notes.trim().is_empty() {
             return Err(ShiftServiceError::ValidationError(
-                "Revision notes cannot be empty".to_string(), ));
+                "Revision notes cannot be empty".to_string(),
+            ));
         }
 
         let shift = self
@@ -1154,13 +1226,13 @@ impl ShiftService {
         if affected == 0 {
             // Either no handover row, or already approved.
             return Err(ShiftServiceError::InvalidStatus(
-                "Handover is already approved".to_string(), ));
+                "Handover is already approved".to_string(),
+            ));
         }
         Ok(())
     }
 
     /// Hospital rates the assigned worker
-
 
     pub async fn rate_worker(
         &self,
@@ -1184,12 +1256,12 @@ impl ShiftService {
         }
         if shift.status != ShiftStatus::Completed {
             return Err(ShiftServiceError::InvalidStatus(
-                "Ratings can only be submitted for completed shifts".to_string(), ));
+                "Ratings can only be submitted for completed shifts".to_string(),
+            ));
         }
-        let ratee_id = shift
-            .assigned_clinician_id
-            .ok_or_else(|| ShiftServiceError::InvalidStatus(
-                "Shift has no assigned clinician to rate".to_string(), ))?;
+        let ratee_id = shift.assigned_clinician_id.ok_or_else(|| {
+            ShiftServiceError::InvalidStatus("Shift has no assigned clinician to rate".to_string())
+        })?;
 
         // 7-day submission window after completion. We use the
         let window_closes_at = shift.updated_at + Duration::days(7);
@@ -1197,7 +1269,7 @@ impl ShiftService {
             return Err(ShiftServiceError::RatingWindowClosed);
         }
 
-        let mut tx = self.pool.begin(). await?;
+        let mut tx = self.pool.begin().await?;
         let rating = match self
             .shift_repo
             .insert_rating(
@@ -1208,7 +1280,8 @@ impl ShiftService {
                 "clinician",
                 request.score,
                 None,
-                request.comment.as_deref(), window_closes_at,
+                request.comment.as_deref(),
+                window_closes_at,
             )
             .await
         {
@@ -1221,13 +1294,12 @@ impl ShiftService {
         self.shift_repo
             .recompute_clinician_rating_tx(&mut tx, ratee_id)
             .await?;
-        tx.commit(). await?;
+        tx.commit().await?;
 
         Ok(rating)
     }
 
     /// Worker rates the hospital
-
 
     pub async fn rate_hospital(
         &self,
@@ -1257,7 +1329,8 @@ impl ShiftService {
         }
         if shift.status != ShiftStatus::Completed {
             return Err(ShiftServiceError::InvalidStatus(
-                "Ratings can only be submitted for completed shifts".to_string(), ));
+                "Ratings can only be submitted for completed shifts".to_string(),
+            ));
         }
 
         let window_closes_at = shift.updated_at + Duration::days(7);
@@ -1269,7 +1342,7 @@ impl ShiftService {
             ShiftServiceError::ValidationError(format!("dimensions serialisation failed: {e}"))
         })?;
 
-        let mut tx = self.pool.begin(). await?;
+        let mut tx = self.pool.begin().await?;
         let rating = match self
             .shift_repo
             .insert_rating(
@@ -1280,7 +1353,8 @@ impl ShiftService {
                 "hospital",
                 request.score,
                 Some(&dims_json),
-                request.comment.as_deref(), window_closes_at,
+                request.comment.as_deref(),
+                window_closes_at,
             )
             .await
         {
@@ -1290,7 +1364,7 @@ impl ShiftService {
             }
             Err(e) => return Err(ShiftServiceError::DatabaseError(e)),
         };
-        tx.commit(). await?;
+        tx.commit().await?;
 
         Ok(rating)
     }
@@ -1335,16 +1409,18 @@ impl ShiftService {
             .update_rating(
                 rating_id,
                 request.score,
-                dims_json.as_ref(), request.comment.as_deref(), )
+                dims_json.as_ref(),
+                request.comment.as_deref(),
+            )
             .await?;
 
         // If the edited rating was for a clinician, refresh the cached avg.
         if updated.ratee_kind == "clinician" {
-            let mut tx = self.pool.begin(). await?;
+            let mut tx = self.pool.begin().await?;
             self.shift_repo
                 .recompute_clinician_rating_tx(&mut tx, updated.ratee_id)
                 .await?;
-            tx.commit(). await?;
+            tx.commit().await?;
         }
 
         Ok(updated)
@@ -1373,7 +1449,13 @@ impl ShiftService {
             .into_iter()
             .map(|r| {
                 // Distance only meaningful for in-person shifts with both endpoints.
-                let distance_km = match (r.shift_type.clone(), r.hospital_lat, r.hospital_lng, r.clinician_lat, r.clinician_lng) {
+                let distance_km = match (
+                    r.shift_type.clone(),
+                    r.hospital_lat,
+                    r.hospital_lng,
+                    r.clinician_lat,
+                    r.clinician_lng,
+                ) {
                     (ShiftType::InPerson, Some(h_lat), Some(h_lng), Some(c_lat), Some(c_lng)) => {
                         Some(crate::utils::geo::haversine_km(h_lat, h_lng, c_lat, c_lng))
                     }
@@ -1410,13 +1492,11 @@ impl ShiftService {
         cards.sort_by(|a, b| {
             urgency_rank(&a.priority)
                 .cmp(&urgency_rank(&b.priority))
-                .then_with(|| {
-                    match (a.distance_km, b.distance_km) {
-                        (Some(x), Some(y)) => x.partial_cmp(&y).unwrap_or(std::cmp::Ordering::Equal),
-                        (Some(_), None) => std::cmp::Ordering::Less,
-                        (None, Some(_)) => std::cmp::Ordering::Greater,
-                        (None, None) => std::cmp::Ordering::Equal,
-                    }
+                .then_with(|| match (a.distance_km, b.distance_km) {
+                    (Some(x), Some(y)) => x.partial_cmp(&y).unwrap_or(std::cmp::Ordering::Equal),
+                    (Some(_), None) => std::cmp::Ordering::Less,
+                    (None, Some(_)) => std::cmp::Ordering::Greater,
+                    (None, None) => std::cmp::Ordering::Equal,
                 })
                 .then_with(|| a.scheduled_start.cmp(&b.scheduled_start))
         });
@@ -1468,7 +1548,8 @@ impl ShiftService {
             )
         {
             return Err(ShiftServiceError::InvalidStatus(
-                "Cannot withdraw interest after assignment".to_string(), ));
+                "Cannot withdraw interest after assignment".to_string(),
+            ));
         }
 
         let removed = self
@@ -1482,7 +1563,6 @@ impl ShiftService {
     }
 
     /// Bookmark a shift for later
-
 
     pub async fn bookmark_shift(
         &self,
@@ -1500,12 +1580,13 @@ impl ShiftService {
             return Err(ShiftServiceError::NotFound(shift_id));
         }
 
-        self.shift_repo.bookmark_shift(shift_id, clinician_id).await?;
+        self.shift_repo
+            .bookmark_shift(shift_id, clinician_id)
+            .await?;
         Ok(())
     }
 
     /// Remove a shift bookmark
-
 
     pub async fn unbookmark_shift(
         &self,
@@ -1518,7 +1599,9 @@ impl ShiftService {
             .await?
             .ok_or(ShiftServiceError::NoClinicianProfile)?;
 
-        self.shift_repo.unbookmark_shift(shift_id, clinician_id).await?;
+        self.shift_repo
+            .unbookmark_shift(shift_id, clinician_id)
+            .await?;
         Ok(())
     }
 
@@ -1539,7 +1622,9 @@ impl ShiftService {
             return Err(ShiftServiceError::NotFound(shift_id));
         }
 
-        self.shift_repo.dismiss_shift(shift_id, clinician_id).await?;
+        self.shift_repo
+            .dismiss_shift(shift_id, clinician_id)
+            .await?;
         Ok(())
     }
 
@@ -1595,11 +1680,12 @@ impl ShiftService {
             )));
         }
 
-        let mut tx = self.pool.begin(). await?;
+        let mut tx = self.pool.begin().await?;
         let updated = self.shift_repo.cancel_shift(&mut tx, shift_id).await?;
         if updated == 0 {
             return Err(ShiftServiceError::InvalidStatus(
-                "Shift is not open or upcoming".to_string(), ));
+                "Shift is not open or upcoming".to_string(),
+            ));
         }
 
         // release the escrowed funds back into the hospital's
@@ -1617,10 +1703,12 @@ impl ShiftService {
             }
         }
 
-        tx.commit(). await?;
+        tx.commit().await?;
 
-        if let Ok(Some((hospital_name, hospital_email))) =
-            self.shift_repo.get_hospital_contact(shift.hospital_id).await
+        if let Ok(Some((hospital_name, hospital_email))) = self
+            .shift_repo
+            .get_hospital_contact(shift.hospital_id)
+            .await
         {
             let content = email_templates::shift_cancelled(
                 &hospital_name,
@@ -1628,8 +1716,15 @@ impl ShiftService {
                 shift.scheduled_start,
                 reason,
             );
-            if let Err(e) = self.email_outbox.enqueue_email(&hospital_email, &content).await {
-                eprintln!("Warning: Failed to queue hospital cancellation email: {}", e);
+            if let Err(e) = self
+                .email_outbox
+                .enqueue_email(&hospital_email, &content)
+                .await
+            {
+                eprintln!(
+                    "Warning: Failed to queue hospital cancellation email: {}",
+                    e
+                );
             }
         }
 
@@ -1644,8 +1739,15 @@ impl ShiftService {
                     shift.scheduled_start,
                     reason,
                 );
-                if let Err(e) = self.email_outbox.enqueue_email(&clinician_email, &content).await {
-                    eprintln!("Warning: Failed to queue clinician cancellation email: {}", e);
+                if let Err(e) = self
+                    .email_outbox
+                    .enqueue_email(&clinician_email, &content)
+                    .await
+                {
+                    eprintln!(
+                        "Warning: Failed to queue clinician cancellation email: {}",
+                        e
+                    );
                 }
             }
         }
@@ -1661,7 +1763,8 @@ impl ShiftService {
     ) -> Result<(), ShiftServiceError> {
         if duration_hours <= 0.0 {
             return Err(ShiftServiceError::ValidationError(
-                "Duration must be greater than zero".to_string(), ));
+                "Duration must be greater than zero".to_string(),
+            ));
         }
 
         let shift = self
@@ -1679,26 +1782,39 @@ impl ShiftService {
 
         let scheduled_end = scheduled_start + Duration::hours(duration_hours as i64);
 
-        let mut tx = self.pool.begin(). await?;
+        let mut tx = self.pool.begin().await?;
         let updated = self
             .shift_repo
-            .reschedule_shift(&mut tx, shift_id, scheduled_start, duration_hours, scheduled_end)
+            .reschedule_shift(
+                &mut tx,
+                shift_id,
+                scheduled_start,
+                duration_hours,
+                scheduled_end,
+            )
             .await?;
         if updated == 0 {
             return Err(ShiftServiceError::InvalidStatus(
-                "Shift is not open or upcoming".to_string(), ));
+                "Shift is not open or upcoming".to_string(),
+            ));
         }
-        tx.commit(). await?;
+        tx.commit().await?;
 
-        if let Ok(Some((hospital_name, hospital_email))) =
-            self.shift_repo.get_hospital_contact(shift.hospital_id).await
+        if let Ok(Some((hospital_name, hospital_email))) = self
+            .shift_repo
+            .get_hospital_contact(shift.hospital_id)
+            .await
         {
             let content = email_templates::shift_rescheduled(
                 &hospital_name,
                 &shift.role_title,
                 scheduled_start,
             );
-            if let Err(e) = self.email_outbox.enqueue_email(&hospital_email, &content).await {
+            if let Err(e) = self
+                .email_outbox
+                .enqueue_email(&hospital_email, &content)
+                .await
+            {
                 eprintln!("Warning: Failed to queue hospital reschedule email: {}", e);
             }
         }
@@ -1713,7 +1829,11 @@ impl ShiftService {
                     &shift.role_title,
                     scheduled_start,
                 );
-                if let Err(e) = self.email_outbox.enqueue_email(&clinician_email, &content).await {
+                if let Err(e) = self
+                    .email_outbox
+                    .enqueue_email(&clinician_email, &content)
+                    .await
+                {
                     eprintln!("Warning: Failed to queue clinician reschedule email: {}", e);
                 }
             }
@@ -1724,22 +1844,29 @@ impl ShiftService {
 
     fn validate_request(&self, request: &CreateShiftRequest) -> Result<(), ShiftServiceError> {
         // Validate required fields
-        if request.role_title.trim(). is_empty() {
+        if request.role_title.trim().is_empty() {
             return Err(ShiftServiceError::ValidationError(
-                "Role title is required".to_string(), ));
+                "Role title is required".to_string(),
+            ));
         }
 
         // F1-F06: Duration must be one of the allowed values.
         const ALLOWED_DURATIONS: [f32; 5] = [2.0, 4.0, 6.0, 8.0, 12.0];
-        if !ALLOWED_DURATIONS.iter(). any(|d| (d - request.duration_hours).abs() < f32::EPSILON) {
+        if !ALLOWED_DURATIONS
+            .iter()
+            .any(|d| (d - request.duration_hours).abs() < f32::EPSILON)
+        {
             return Err(ShiftServiceError::ValidationError(
-                "Duration must be one of 2, 4, 6, 8, or 12 hours".to_string(), ));
+                "Duration must be one of 2, 4, 6, 8, or 12 hours".to_string(),
+            ));
         }
 
         // F1-F05: Start time must fall on a 15-minute boundary.
-        if let Err(e) = crate::utils::validation::validate_15min_boundary(&request.scheduled_start) {
+        if let Err(e) = crate::utils::validation::validate_15min_boundary(&request.scheduled_start)
+        {
             return Err(ShiftServiceError::ValidationError(
-                e.message.map(|m| m.to_string())
+                e.message
+                    .map(|m| m.to_string())
                     .unwrap_or_else(|| "Start time must be on a 15-minute boundary".to_string()),
             ));
         }
@@ -1748,31 +1875,36 @@ impl ShiftService {
         let now = Utc::now();
         if request.scheduled_start < now {
             return Err(ShiftServiceError::ValidationError(
-                "Start time cannot be in the past".to_string(), ));
+                "Start time cannot be in the past".to_string(),
+            ));
         }
 
         // Validate pay type requirements + F1-F08/F1-F09 minimum rates.
-        const MIN_HOURLY_KOBO: i64 = 200_000;   // ₦2,000
-        const MIN_FIXED_KOBO: i64 = 1_000_000;  // ₦10,000
+        const MIN_HOURLY_KOBO: i64 = 200_000; // ₦2,000
+        const MIN_FIXED_KOBO: i64 = 1_000_000; // ₦10,000
         match request.pay_type {
             crate::models::shift::PayType::HourlyRate => {
                 let rate = request.rate_kobo_per_hour.ok_or_else(|| {
                     ShiftServiceError::ValidationError(
-                        "Hourly rate is required for hourly pay type".to_string(), )
+                        "Hourly rate is required for hourly pay type".to_string(),
+                    )
                 })?;
                 if rate < MIN_HOURLY_KOBO {
                     return Err(ShiftServiceError::ValidationError(
-                        "Hourly rate must be at least ₦2,000".to_string(), ));
+                        "Hourly rate must be at least ₦2,000".to_string(),
+                    ));
                 }
             }
             crate::models::shift::PayType::FixedRate => {
                 let rate = request.fixed_rate_kobo.ok_or_else(|| {
                     ShiftServiceError::ValidationError(
-                        "Fixed rate is required for fixed pay type".to_string(), )
+                        "Fixed rate is required for fixed pay type".to_string(),
+                    )
                 })?;
                 if rate < MIN_FIXED_KOBO {
                     return Err(ShiftServiceError::ValidationError(
-                        "Fixed rate must be at least ₦10,000".to_string(), ));
+                        "Fixed rate must be at least ₦10,000".to_string(),
+                    ));
                 }
             }
         }
@@ -1783,26 +1915,30 @@ impl ShiftService {
             ShiftPriority::Stat => {
                 if time_until_start > Duration::hours(1) {
                     return Err(ShiftServiceError::ValidationError(
-                        "STAT shifts must start within 1 hour of creation".to_string(), ));
+                        "STAT shifts must start within 1 hour of creation".to_string(),
+                    ));
                 }
             }
             ShiftPriority::Urgent => {
                 if time_until_start > Duration::hours(4) {
                     return Err(ShiftServiceError::ValidationError(
-                        "Urgent shifts must start within 4 hours of creation".to_string(), ));
+                        "Urgent shifts must start within 4 hours of creation".to_string(),
+                    ));
                 }
             }
             ShiftPriority::Normal => {
                 // Must start on the same calendar day (UTC).
                 if request.scheduled_start.date_naive() != now.date_naive() {
                     return Err(ShiftServiceError::ValidationError(
-                        "Normal shifts must start today".to_string(), ));
+                        "Normal shifts must start today".to_string(),
+                    ));
                 }
             }
             ShiftPriority::Scheduled => {
                 if time_until_start > Duration::days(30) {
                     return Err(ShiftServiceError::ValidationError(
-                        "Scheduled shifts can be at most 30 days in the future".to_string(), ));
+                        "Scheduled shifts can be at most 30 days in the future".to_string(),
+                    ));
                 }
             }
         }
@@ -1810,7 +1946,8 @@ impl ShiftService {
         // Validate broadcast consent
         if !request.broadcast_consent_confirmed {
             return Err(ShiftServiceError::ValidationError(
-                "Broadcast consent must be confirmed".to_string(), ));
+                "Broadcast consent must be confirmed".to_string(),
+            ));
         }
 
         Ok(())
@@ -1823,17 +1960,21 @@ impl ShiftService {
         request: &CreateShiftRequest,
     ) -> Result<(), ShiftServiceError> {
         let one_hour_ago = Utc::now() - Duration::hours(1);
-        
-        let duplicate = self.shift_repo.find_similar_shift(
-            hospital_id,
-            &request.role_title,
-            request.scheduled_start,
-            one_hour_ago,
-        ).await?;
+
+        let duplicate = self
+            .shift_repo
+            .find_similar_shift(
+                hospital_id,
+                &request.role_title,
+                request.scheduled_start,
+                one_hour_ago,
+            )
+            .await?;
 
         if duplicate.is_some() {
             return Err(ShiftServiceError::DuplicateShift(
-                "Similar shift already exists.".to_string(), ));
+                "Similar shift already exists.".to_string(),
+            ));
         }
 
         Ok(())
@@ -1847,13 +1988,18 @@ impl ShiftService {
     /// Calculate matched clinicians based on shift type and location
 
     pub async fn auto_approve_due_handovers(&self) -> Result<usize, ShiftServiceError> {
-        let approved = self.shift_repo.auto_approve_due_handovers(). await?;
-        let count = approved.len(); for (handover_id, shift_id, clinician_id, _hospital_id, role_title) in approved {
+        let approved = self.shift_repo.auto_approve_due_handovers().await?;
+        let count = approved.len();
+        for (handover_id, shift_id, clinician_id, _hospital_id, role_title) in approved {
             if let Ok(Some((first_name, _last_name, clinician_email))) =
                 self.shift_repo.get_clinician_contact(clinician_id).await
             {
                 let content = email_templates::handover_auto_approved(&first_name, &role_title);
-                if let Err(e) = self.email_outbox.enqueue_email(&clinician_email, &content).await {
+                if let Err(e) = self
+                    .email_outbox
+                    .enqueue_email(&clinician_email, &content)
+                    .await
+                {
                     eprintln!("Warning: Failed to queue handover auto-approval email: {e}");
                 }
             }
@@ -1869,7 +2015,7 @@ impl ShiftService {
     /// One iteration of the offer-expiry sweep. Flips every
 
     pub async fn expire_due_offers(&self) -> Result<usize, ShiftServiceError> {
-        let expired = self.shift_repo.expire_due_offers(). await?;
+        let expired = self.shift_repo.expire_due_offers().await?;
         let count = expired.len();
 
         // Collect affected clinician_ids so we can bulk-refresh their acceptance rates
@@ -1879,7 +2025,11 @@ impl ShiftService {
                 self.shift_repo.get_hospital_contact(hospital_id).await
             {
                 let content = email_templates::shift_offer_expired(&role_title);
-                if let Err(e) = self.email_outbox.enqueue_email(&hospital_email, &content).await {
+                if let Err(e) = self
+                    .email_outbox
+                    .enqueue_email(&hospital_email, &content)
+                    .await
+                {
                     eprintln!("Warning: Failed to queue offer-expiry email: {e}");
                 }
             }
@@ -1961,7 +2111,8 @@ impl ShiftService {
             })?;
         if photo_bytes.is_empty() {
             return Err(ShiftServiceError::ValidationError(
-                "Photo cannot be empty".to_string(), ));
+                "Photo cannot be empty".to_string(),
+            ));
         }
 
         let request_id = match self
@@ -1972,7 +2123,8 @@ impl ShiftService {
                 request.latitude,
                 request.longitude,
                 &photo_bytes,
-                request.photo_mime_type.as_deref(), )
+                request.photo_mime_type.as_deref(),
+            )
             .await
         {
             Ok(id) => id,
@@ -1983,18 +2135,21 @@ impl ShiftService {
         };
 
         // Best-effort notify the hospital admin.
-        if let Ok(Some((_, hospital_email))) =
-            self.shift_repo.get_hospital_contact(shift.hospital_id).await
+        if let Ok(Some((_, hospital_email))) = self
+            .shift_repo
+            .get_hospital_contact(shift.hospital_id)
+            .await
         {
             if let Ok(Some((first_name, last_name, _))) =
                 self.shift_repo.get_clinician_contact(clinician_id).await
             {
                 let clinician_name = format!("{} {}", first_name, last_name).trim().to_string();
-                let content = email_templates::clockin_approval_requested(
-                    &clinician_name,
-                    &shift.role_title,
-                );
-                let _ = self.email_outbox.enqueue_email(&hospital_email, &content).await;
+                let content =
+                    email_templates::clockin_approval_requested(&clinician_name, &shift.role_title);
+                let _ = self
+                    .email_outbox
+                    .enqueue_email(&hospital_email, &content)
+                    .await;
             }
         }
 
@@ -2033,12 +2188,19 @@ impl ShiftService {
         }
 
         self.shift_repo
-            .decide_clockin_approval_request(request_id, requester_user_id, approve, notes.as_deref())
+            .decide_clockin_approval_request(
+                request_id,
+                requester_user_id,
+                approve,
+                notes.as_deref(),
+            )
             .await?;
 
         // Best-effort notify the worker.
-        if let Ok(Some((first_name, _last_name, clinician_email))) =
-            self.shift_repo.get_clinician_contact(record.clinician_id).await
+        if let Ok(Some((first_name, _last_name, clinician_email))) = self
+            .shift_repo
+            .get_clinician_contact(record.clinician_id)
+            .await
         {
             let content = if approve {
                 email_templates::clockin_approval_approved(&first_name, &shift.role_title)
@@ -2046,9 +2208,13 @@ impl ShiftService {
                 email_templates::clockin_approval_denied(
                     &first_name,
                     &shift.role_title,
-                    notes.as_deref(), )
+                    notes.as_deref(),
+                )
             };
-            let _ = self.email_outbox.enqueue_email(&clinician_email, &content).await;
+            let _ = self
+                .email_outbox
+                .enqueue_email(&clinician_email, &content)
+                .await;
         }
 
         Ok(())
@@ -2057,13 +2223,17 @@ impl ShiftService {
     /// One iteration of the re-broadcast cadence sweep. Returns
 
     pub async fn rebroadcast_due_shifts(&self) -> Result<usize, ShiftServiceError> {
-        let due = self.shift_repo.find_shifts_due_for_rebroadcast(). await?;
-        let count = due.len(); for shift in due {
+        let due = self.shift_repo.find_shifts_due_for_rebroadcast().await?;
+        let count = due.len();
+        for shift in due {
             // Compute fresh eligible-count and emit notifications.
             let matched = match self.find_eligible_clinicians_for_shift(&shift).await {
                 Ok(list) => list.len() as i32,
                 Err(e) => {
-                    eprintln!("Warning: eligibility lookup failed for shift {}: {e}", shift.id);
+                    eprintln!(
+                        "Warning: eligibility lookup failed for shift {}: {e}",
+                        shift.id
+                    );
                     continue;
                 }
             };
@@ -2081,7 +2251,10 @@ impl ShiftService {
                 .record_broadcast(shift.id, None, matched, radius_km)
                 .await
             {
-                eprintln!("Warning: Failed to record re-broadcast for shift {}: {e}", shift.id);
+                eprintln!(
+                    "Warning: Failed to record re-broadcast for shift {}: {e}",
+                    shift.id
+                );
                 continue;
             }
 
@@ -2104,16 +2277,21 @@ impl ShiftService {
     }
 
     /// Map a shift's broad `RoleCategory` to the set of
-    fn specialties_for_role(role: &crate::models::shift::RoleCategory)
-        -> Vec<crate::models::clinician::ClinicalSpecialty>
-    {
+    fn specialties_for_role(
+        role: &crate::models::shift::RoleCategory,
+    ) -> Vec<crate::models::clinician::ClinicalSpecialty> {
         use crate::models::clinician::ClinicalSpecialty as CS;
         use crate::models::shift::RoleCategory as RC;
         match role {
             RC::Doctor => vec![
-                CS::EmergencyMedicine, CS::Pediatrics, CS::IcuSpecialist,
-                CS::Surgery, CS::Anesthesiology, CS::Cardiology,
-                CS::Obstetrics, CS::Psychiatry,
+                CS::EmergencyMedicine,
+                CS::Pediatrics,
+                CS::IcuSpecialist,
+                CS::Surgery,
+                CS::Anesthesiology,
+                CS::Cardiology,
+                CS::Obstetrics,
+                CS::Psychiatry,
             ],
             RC::Nurse => vec![CS::GeneralNursing],
             RC::Midwife => vec![CS::Obstetrics, CS::GeneralNursing],
@@ -2122,10 +2300,19 @@ impl ShiftService {
             RC::Radiographer => vec![CS::Radiology],
             RC::Physiotherapist => vec![CS::Other],
             RC::Other => vec![
-                CS::EmergencyMedicine, CS::Pediatrics, CS::IcuSpecialist,
-                CS::GeneralNursing, CS::Pharmacy, CS::LabTechnician,
-                CS::Surgery, CS::Radiology, CS::Anesthesiology,
-                CS::Cardiology, CS::Obstetrics, CS::Psychiatry, CS::Other,
+                CS::EmergencyMedicine,
+                CS::Pediatrics,
+                CS::IcuSpecialist,
+                CS::GeneralNursing,
+                CS::Pharmacy,
+                CS::LabTechnician,
+                CS::Surgery,
+                CS::Radiology,
+                CS::Anesthesiology,
+                CS::Cardiology,
+                CS::Obstetrics,
+                CS::Psychiatry,
+                CS::Other,
             ],
         }
     }
@@ -2168,7 +2355,8 @@ impl ShiftService {
                 // No recorded location → cannot prove they're nearby.
                 _ => false,
             })
-            .collect(); Ok(filtered)
+            .collect();
+        Ok(filtered)
     }
 
     async fn calculate_matched_clinicians(&self, shift: &Shift) -> i32 {
@@ -2212,7 +2400,8 @@ impl ShiftService {
                         &hospital_name,
                         &shift.role_title,
                         shift.scheduled_start,
-                        shift.priority.clone(), );
+                        shift.priority.clone(),
+                    );
                     if let Err(e) = self.email_outbox.enqueue_email(&ec.email, &content).await {
                         eprintln!(
                             "Warning: Failed to queue broadcast email to clinician {}: {e}",
@@ -2233,7 +2422,10 @@ impl ShiftService {
     }
 
     /// Preview shift before publishing
-    pub async fn preview_shift(&self, request: &CreateShiftRequest) -> Result<ShiftPreview, ShiftServiceError> {
+    pub async fn preview_shift(
+        &self,
+        request: &CreateShiftRequest,
+    ) -> Result<ShiftPreview, ShiftServiceError> {
         // Validate the request first
         self.validate_request(request)?;
 
@@ -2242,7 +2434,12 @@ impl ShiftService {
 
         // Generate preview
         Ok(ShiftPreview {
-            role_title: request.role_title.clone(), specialty: request.specialty.clone(), department: request.department.clone(), shift_type: request.shift_type.clone(), priority: request.priority.clone(), scheduled_start: request.scheduled_start,
+            role_title: request.role_title.clone(),
+            specialty: request.specialty.clone(),
+            department: request.department.clone(),
+            shift_type: request.shift_type.clone(),
+            priority: request.priority.clone(),
+            scheduled_start: request.scheduled_start,
             duration_hours: request.duration_hours,
             base_amount_kobo: base_amount,
             stat_bonus_kobo: stat_bonus,
@@ -2263,11 +2460,10 @@ impl ShiftService {
         use crate::models::shift::PayType;
 
         let base_amount = match request.pay_type {
-            PayType::HourlyRate => {
-                request.rate_kobo_per_hour
-                    .map(|rate| (rate as f64 * request.duration_hours as f64) as i64)
-                    .unwrap_or(0)
-            }
+            PayType::HourlyRate => request
+                .rate_kobo_per_hour
+                .map(|rate| (rate as f64 * request.duration_hours as f64) as i64)
+                .unwrap_or(0),
             PayType::FixedRate => request.fixed_rate_kobo.unwrap_or(0),
         };
 

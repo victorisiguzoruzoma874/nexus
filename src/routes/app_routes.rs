@@ -18,35 +18,26 @@ use utoipa::{
 };
 use utoipa_swagger_ui::SwaggerUi;
 
-use crate::handlers::{admin, auth, earnings, health, hospitals, identity, registration, clinician_registration, shifts, wallet, webhooks};
+use crate::handlers::{
+    admin, auth, clinician_registration, distance, earnings, health, here_maps, hospitals,
+    identity, location, registration, shifts, wallet, webhooks,
+};
 use crate::repositories::{
-    audit::AuditRepository,
-    billing::BillingRepository,
-    clinician::ClinicianRepository,
-    hospital::HospitalRepository,
-    identity_verification::IdentityVerificationRepository,
-    location::LocationRepository,
-    shift::ShiftRepository,
-    wallet::WalletRepository,
+    audit::AuditRepository, billing::BillingRepository, clinician::ClinicianRepository,
+    hospital::HospitalRepository, identity_verification::IdentityVerificationRepository,
+    location::LocationRepository, shift::ShiftRepository, wallet::WalletRepository,
 };
 use crate::services::{
-    audit_service::AuditService,
-    auth_service::AuthService,
-    encryption::EncryptionService,
-    geocoding::GeocodingClient,
-    identity_verification_service::IdentityVerificationService,
-    location_service::LocationService,
-    notification_service::NotificationService,
-    email_outbox_service::EmailOutboxService,
-    safehaven::SafeHavenClient,
-    registration_service::RegistrationService,
+    audit_service::AuditService, auth_service::AuthService,
     clinician_registration_service::ClinicianRegistrationService,
-    shift_service::ShiftService,
-    wallet_service::WalletService,
-    payout_service::PayoutService,
+    distance_service::DistanceService, email_outbox_service::EmailOutboxService,
+    encryption::EncryptionService, geocoding::GeocodingClient, here_maps::HereMapsClient,
+    identity_verification_service::IdentityVerificationService, location_service::LocationService,
+    notification_service::NotificationService, payout_service::PayoutService,
+    registration_service::RegistrationService, safehaven::SafeHavenClient,
+    shift_service::ShiftService, wallet_service::WalletService,
 };
 
-/// Shared application state
 #[derive(Clone)]
 pub struct AppState {
     pub pool: PgPool,
@@ -59,13 +50,13 @@ pub struct AppState {
     pub clinician_repo: Arc<ClinicianRepository>,
     pub identity_service: Arc<IdentityVerificationService>,
     pub safehaven: Arc<SafeHavenClient>,
+    pub here_maps_client: Arc<HereMapsClient>,
+    pub distance_service: Arc<DistanceService>,
 }
 
-/// API Documentation
 #[derive(OpenApi)]
 #[openapi(
     paths(
-        // Health
         crate::handlers::health::health_check,
         crate::handlers::health::db_health_check,
         // Auth
@@ -73,13 +64,11 @@ pub struct AppState {
         crate::handlers::auth::email_otp_verify,
         crate::handlers::auth::refresh_token,
         crate::handlers::auth::logout,
-        // Hospital Registration (Admin)
         crate::handlers::registration::register_hospital,
         crate::handlers::registration::list_hospitals,
         crate::handlers::registration::get_registration_status,
         crate::handlers::registration::approve_hospital,
         crate::handlers::registration::reject_hospital,
-        // Clinician Registration
         crate::handlers::clinician_registration::send_otp,
         crate::handlers::clinician_registration::verify_otp,
         crate::handlers::clinician_registration::complete_profile,
@@ -91,6 +80,14 @@ pub struct AppState {
         crate::handlers::identity::clinician_validate,
         crate::handlers::identity::list_banks,
         crate::handlers::identity::resolve_account,
+        // Location & Distance
+        crate::handlers::distance::calculate_distance,
+        crate::handlers::here_maps::geocode_address,
+        crate::handlers::here_maps::reverse_geocode,
+        crate::handlers::location::search_nearby_facilities,
+        crate::handlers::location::search_nexuscare_facilities,
+        crate::handlers::location::autocomplete_address,
+        crate::handlers::location::search_nearby_shifts,
         // Shifts
         crate::handlers::shifts::create_shift,
         crate::handlers::shifts::list_shifts,
@@ -123,7 +120,6 @@ pub struct AppState {
         crate::handlers::shifts::assign_shift,
         crate::handlers::shifts::cancel_shift,
         crate::handlers::shifts::reschedule_shift,
-        // Admin
         crate::handlers::admin::list_hospitals_admin,
         crate::handlers::admin::list_clinicians_admin,
         // Wallet
@@ -131,6 +127,8 @@ pub struct AppState {
         crate::handlers::wallet::get_ledger,
         crate::handlers::wallet::create_deposit,
         crate::handlers::wallet::list_deposits,
+        crate::handlers::wallet::initiate_sub_account,
+        crate::handlers::wallet::provision_sub_account,
         crate::handlers::wallet::list_payouts,
         crate::handlers::wallet::get_payout_status,
         crate::handlers::wallet::get_statement,
@@ -187,6 +185,8 @@ pub struct AppState {
             crate::handlers::wallet::LedgerPage,
             crate::handlers::wallet::PayoutPage,
             crate::handlers::wallet::PayoutStatusResponse,
+            crate::handlers::wallet::ProvisionSubAccountRequest,
+            crate::handlers::wallet::SubAccountStatusResponse,
             crate::handlers::wallet::PayoutRetryResponse,
             crate::services::payout_service::PayoutRow,
             crate::handlers::earnings::EarningsSummary,
@@ -198,6 +198,7 @@ pub struct AppState {
             // Models
             crate::models::admin_registration::HospitalRegistrationRequest,
             crate::models::admin_registration::Address,
+            crate::models::admin_registration::Coordinates,
             crate::models::admin_registration::PaymentDetails,
             crate::models::admin_registration::PaymentMethodType,
             crate::models::shift::Shift,
@@ -242,20 +243,45 @@ pub struct AppState {
             crate::services::registration_service::HospitalListResponse,
             crate::services::registration_service::HospitalSummary,
             crate::services::registration_service::PaginationMetadata,
+            // Location & HERE Maps models
+            crate::models::here_maps::FacilitySearchResponse,
+            crate::models::here_maps::AddressAutocompleteResponse,
+            crate::models::here_maps::Facility,
+            crate::models::here_maps::AddressSuggestion,
+            crate::models::here_maps::Position,
+            crate::models::here_maps::ContactInfo,
+            crate::handlers::location::FacilitySearchParams,
+            crate::handlers::location::AutocompleteParams,
+            crate::handlers::location::NearbyShiftsResponse,
+            crate::handlers::location::FacilityWithShifts,
+            crate::handlers::location::SimpleShift,
+            // HERE Maps geocoding models
+            crate::handlers::here_maps::GeocodeResponse,
+            crate::handlers::here_maps::GeocodeItem,
+            crate::handlers::here_maps::GeocodePosition,
+            crate::handlers::here_maps::ReverseGeocodeResponse,
+            crate::handlers::here_maps::ReverseGeocodeItem,
+            crate::handlers::here_maps::AddressDetails,
+            // Distance calculation models
+            crate::models::distance::DistanceRequest,
+            crate::models::distance::DistanceResponse,
+            crate::models::distance::LocationInput,
+            crate::models::distance::LocationType,
+            crate::models::distance::LocationDetails,
+            crate::models::distance::DistanceInfo,
+            crate::models::distance::TimeInfo,
+            crate::models::distance::RouteSummary,
         )
     ),
     info(
         title = "NexusCare Hospital Management API",
         version = "1.0.0",
-        description = "Complete API for hospital management, clinician registration, authentication, and shift creation",
-        contact(
-            name = "NexusCare Support",
-            email = "support@nexuscare.com"
-        )
+        description = "Hospital management, ML pipeline, real-time SSE events",
+        contact(name = "NexusCare Support", email = "support@nexuscare.com")
     ),
     servers(
-        (url = "http://localhost:8080", description = "Local development server"),
-        (url = "https://api.nexuscare.com", description = "Production server")
+        (url = "http://localhost:8080", description = "Local development"),
+        (url = "https://api.nexuscare.com", description = "Production")
     ),
     tags(
         (name = "health", description = "Health check endpoints"),
@@ -263,6 +289,7 @@ pub struct AppState {
         (name = "hospitals", description = "Hospital management endpoints"),
         (name = "clinicians", description = "Clinician registration and management endpoints"),
         (name = "shifts", description = "Shift creation and management endpoints"),
+        (name = "location", description = "Location services — nearby facilities, address autocomplete, HERE Maps integration"),
         (name = "admin", description = "Admin-only endpoints"),
         (name = "wallet", description = "Hospital wallet — balance, deposits, ledger (Tier 2)"),
         (name = "webhooks", description = "Inbound webhooks from external providers (SafeHaven)"),
@@ -289,7 +316,8 @@ impl Modify for SecurityAddon {
                     .scheme(HttpAuthScheme::Bearer)
                     .bearer_format("JWT")
                     .description(Some("Paste a JWT from POST /api/v1/auth/otp/verify."))
-                    .build(), ),
+                    .build(),
+            ),
         );
 
         // 2. Apply the scheme to every operation by default. Endpoints that
@@ -307,7 +335,6 @@ pub fn create_router(
         .allow_methods(Any)
         .allow_headers(Any);
 
-    // Initialize repositories
     let hospital_repo = Arc::new(HospitalRepository::new(pool.clone()));
     let location_repo = Arc::new(LocationRepository::new(pool.clone()));
     // Held for wallet ledger; constructed here so the connection pool
@@ -315,26 +342,28 @@ pub fn create_router(
     let audit_repo = Arc::new(AuditRepository::new(pool.clone()));
     let clinician_repo = Arc::new(ClinicianRepository::new(pool.clone()));
     let shift_repo = Arc::new(ShiftRepository::new(pool.clone()));
+    let patient_repo = Arc::new(PatientRepository::new(pool.clone()));
+    let feedback_repo = Arc::new(FeedbackRepository::new(pool.clone()));
 
-    // Initialize external services
-    let geocoding_client = Arc::new(GeocodingClient::new(
-        std::env::var("GEOCODING_API_URL").ok(), ));
+    let geocoding_client = Arc::new(GeocodingClient::new(std::env::var("GEOCODING_API_URL").ok()));
 
     let safehaven_client = Arc::new(SafeHavenClient::from_env());
 
     let encryption_service = Arc::new({
-        let key_hex = std::env::var("ENCRYPTION_KEY")
-            .unwrap_or_else(|_| "0".repeat(64));
-        let key_bytes = hex::decode(&key_hex)
-            .unwrap_or_else(|_| vec![0u8; 32]);
-        EncryptionService::new(key_bytes)
-            .expect("Failed to create encryption service")
+        let key_hex = std::env::var("ENCRYPTION_KEY").unwrap_or_else(|_| "0".repeat(64));
+        let key_bytes = hex::decode(&key_hex).unwrap_or_else(|_| vec![0u8; 32]);
+        EncryptionService::new(key_bytes).expect("Failed to create encryption service")
     });
 
     // Initialize business services
+    let here_api_key = std::env::var("HERE_API_KEY").unwrap_or_default();
+    let here_maps_client = Arc::new(HereMapsClient::new(here_api_key));
+    let distance_service = Arc::new(DistanceService::new(here_maps_client.clone(), true));
+
     let location_service = Arc::new(LocationService::new(
-        geocoding_client,
-        location_repo.clone(), ));
+        geocoding_client.clone(),
+        location_repo.clone(),
+    ));
 
     let audit_service = Arc::new(AuditService::new(audit_repo));
 
@@ -349,34 +378,52 @@ pub fn create_router(
     // Initialize wallet service. Threaded into registration_service
     let wallet_repo = Arc::new(WalletRepository::new(pool.clone()));
     let wallet_service = Arc::new(WalletService::new(
-        wallet_repo.clone(), safehaven_client.clone(), pool.clone(), ));
+        wallet_repo.clone(),
+        safehaven_client.clone(),
+        pool.clone(),
+    ));
 
-    // Initialize registration service
     let registration_service = Arc::new(RegistrationService::new(
         hospital_repo,
         location_service,
         audit_service,
-        email_outbox_service.clone(), wallet_service.clone(), pool.clone(), identity_service.clone(), ));
+        email_outbox_service.clone(),
+        wallet_service.clone(),
+        pool.clone(),
+        identity_service.clone(),
+    ));
 
-    // Initialize clinician registration service
     let clinician_registration_service = Arc::new(ClinicianRegistrationService::new(
-        clinician_repo.clone(), email_outbox_service.clone(), safehaven_client.clone(), encryption_service.clone(), pool.clone(), identity_service.clone(), ));
+        clinician_repo.clone(),
+        email_outbox_service.clone(),
+        safehaven_client.clone(),
+        encryption_service.clone(),
+        pool.clone(),
+        identity_service.clone(),
+    ));
 
-    // Initialize auth service
     let auth_service = Arc::new(AuthService::new(pool.clone(), email_outbox_service.clone()));
 
-    // Initialize shift service
     let shift_service = Arc::new(ShiftService::new(
         shift_repo,
-        pool.clone(), notification_service.clone(), email_outbox_service.clone(), wallet_service.clone(), ));
+        pool.clone(),
+        notification_service.clone(),
+        email_outbox_service.clone(),
+        wallet_service.clone(),
+    ));
 
     // Initialize payout service. Borrows the wallet repo so it can
     let payout_service = Arc::new(PayoutService::new(
-        pool.clone(), wallet_repo.clone(), clinician_repo.clone(), safehaven_client.clone(), encryption_service.clone(), ));
+        pool.clone(),
+        wallet_repo.clone(),
+        clinician_repo.clone(),
+        safehaven_client.clone(),
+        encryption_service.clone(),
+    ));
 
-    // Create shared state
     let state = AppState {
-        pool: pool.clone(), registration_service,
+        pool: pool.clone(),
+        registration_service,
         clinician_registration_service,
         auth_service,
         shift_service,
@@ -384,11 +431,12 @@ pub fn create_router(
         payout_service,
         clinician_repo: clinician_repo.clone(),
         identity_service,
-        safehaven: safehaven_client.clone(), };
+        safehaven: safehaven_client.clone(),
+        here_maps_client,
+        distance_service,
+    };
 
-    // Create API routes
     let api_router = Router::new()
-        // Health
         .route("/health", get(health::health_check))
         .route("/health/db", get(health::db_health_check))
         // Auth (OTP-only).
@@ -401,10 +449,7 @@ pub fn create_router(
             "/api/v1/hospitals/register",
             post(registration::register_hospital),
         )
-        .route(
-            "/api/v1/hospitals",
-            get(registration::list_hospitals),
-        )
+        .route("/api/v1/hospitals", get(registration::list_hospitals))
         .route(
             "/api/v1/hospitals/{hospital_id}/status",
             get(registration::get_registration_status),
@@ -418,10 +463,7 @@ pub fn create_router(
             "/api/v1/admin/hospitals/{hospital_id}/reject",
             post(registration::reject_hospital),
         )
-        .route(
-            "/api/v1/admin/hospitals",
-            get(admin::list_hospitals_admin),
-        )
+        .route("/api/v1/admin/hospitals", get(admin::list_hospitals_admin))
         .route(
             "/api/v1/admin/clinicians",
             get(admin::list_clinicians_admin),
@@ -470,21 +512,53 @@ pub fn create_router(
         )
         .route("/api/v1/banks", get(identity::list_banks))
         .route("/api/v1/banks/resolve", post(identity::resolve_account))
+        // Location services
+        .route(
+            "/api/v1/distance/calculate",
+            post(distance::calculate_distance),
+        )
+        .route("/api/v1/here/geocode", get(here_maps::geocode_address))
+        .route(
+            "/api/v1/here/reverse-geocode",
+            get(here_maps::reverse_geocode),
+        )
+        .route(
+            "/api/v1/location/health-facilities/search",
+            get(location::search_nearby_facilities),
+        )
+        .route(
+            "/api/v1/location/nexuscare-facilities/search",
+            get(location::search_nexuscare_facilities),
+        )
+        .route(
+            "/api/v1/location/address/autocomplete",
+            get(location::autocomplete_address),
+        )
+        .route(
+            "/api/v1/location/nearby-shifts",
+            get(location::search_nearby_shifts),
+        )
         // Shifts — gated per FRS v2.0 permission matrix.
         .route(
             "/api/v1/shifts",
-            post(shifts::create_shift)
-                .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
+            post(shifts::create_shift).route_layer(from_fn(require_role(&[
+                UserRole::HospitalAdmin,
+                UserRole::SuperAdmin,
+            ]))),
         )
         .route(
             "/api/v1/shifts",
-            get(shifts::list_shifts)
-                .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
+            get(shifts::list_shifts).route_layer(from_fn(require_role(&[
+                UserRole::HospitalAdmin,
+                UserRole::SuperAdmin,
+            ]))),
         )
         .route(
             "/api/v1/shifts/preview",
-            post(shifts::preview_shift)
-                .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
+            post(shifts::preview_shift).route_layer(from_fn(require_role(&[
+                UserRole::HospitalAdmin,
+                UserRole::SuperAdmin,
+            ]))),
         )
         .route("/api/v1/shifts/{shift_id}", get(shifts::get_shift))
         .route(
@@ -499,18 +573,24 @@ pub fn create_router(
         )
         .route(
             "/api/v1/shifts/{shift_id}/applications",
-            get(shifts::list_shift_applications)
-                .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
+            get(shifts::list_shift_applications).route_layer(from_fn(require_role(&[
+                UserRole::HospitalAdmin,
+                UserRole::SuperAdmin,
+            ]))),
         )
         .route(
             "/api/v1/shifts/{shift_id}/interested",
-            get(shifts::list_interested_for_shift)
-                .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
+            get(shifts::list_interested_for_shift).route_layer(from_fn(require_role(&[
+                UserRole::HospitalAdmin,
+                UserRole::SuperAdmin,
+            ]))),
         )
         .route(
             "/api/v1/shifts/{shift_id}/offer",
-            post(shifts::offer_shift)
-                .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
+            post(shifts::offer_shift).route_layer(from_fn(require_role(&[
+                UserRole::HospitalAdmin,
+                UserRole::SuperAdmin,
+            ]))),
         )
         .route(
             "/api/v1/shifts/{shift_id}/accept",
@@ -524,8 +604,7 @@ pub fn create_router(
         )
         .route(
             "/api/v1/shifts/{shift_id}/clockin",
-            post(shifts::clock_in)
-                .route_layer(from_fn(require_role(&[UserRole::HealthWorker]))),
+            post(shifts::clock_in).route_layer(from_fn(require_role(&[UserRole::HealthWorker]))),
         )
         .route(
             "/api/v1/shifts/{shift_id}/handover",
@@ -534,33 +613,35 @@ pub fn create_router(
         )
         .route(
             "/api/v1/shifts/{shift_id}/clockout",
-            post(shifts::clock_out)
-                .route_layer(from_fn(require_role(&[UserRole::HealthWorker]))),
+            post(shifts::clock_out).route_layer(from_fn(require_role(&[UserRole::HealthWorker]))),
         )
         .route(
             "/api/v1/shifts/{shift_id}/handover/revision",
-            post(shifts::request_handover_revision)
-                .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
+            post(shifts::request_handover_revision).route_layer(from_fn(require_role(&[
+                UserRole::HospitalAdmin,
+                UserRole::SuperAdmin,
+            ]))),
         )
         .route(
             "/api/v1/shifts/{shift_id}/handover/approve",
-            post(shifts::approve_handover)
-                .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
+            post(shifts::approve_handover).route_layer(from_fn(require_role(&[
+                UserRole::HospitalAdmin,
+                UserRole::SuperAdmin,
+            ]))),
         )
         .route(
             "/api/v1/shifts/{shift_id}/ratings/worker",
-            post(shifts::rate_worker)
-                .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
+            post(shifts::rate_worker).route_layer(from_fn(require_role(&[
+                UserRole::HospitalAdmin,
+                UserRole::SuperAdmin,
+            ]))),
         )
         .route(
             "/api/v1/shifts/{shift_id}/ratings/hospital",
             post(shifts::rate_hospital)
                 .route_layer(from_fn(require_role(&[UserRole::HealthWorker]))),
         )
-        .route(
-            "/api/v1/ratings/{rating_id}",
-            patch(shifts::edit_rating),
-        )
+        .route("/api/v1/ratings/{rating_id}", patch(shifts::edit_rating))
         .route(
             "/api/v1/worker/shifts/nearby",
             get(shifts::list_nearby_shifts)
@@ -594,65 +675,97 @@ pub fn create_router(
         )
         .route(
             "/api/v1/clockin-approvals/{request_id}/approve",
-            post(shifts::approve_clockin_request)
-                .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
+            post(shifts::approve_clockin_request).route_layer(from_fn(require_role(&[
+                UserRole::HospitalAdmin,
+                UserRole::SuperAdmin,
+            ]))),
         )
         .route(
             "/api/v1/clockin-approvals/{request_id}/deny",
-            post(shifts::deny_clockin_request)
-                .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
+            post(shifts::deny_clockin_request).route_layer(from_fn(require_role(&[
+                UserRole::HospitalAdmin,
+                UserRole::SuperAdmin,
+            ]))),
         )
         .route(
             "/api/v1/shifts/{shift_id}/assign",
-            post(shifts::assign_shift)
-                .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
+            post(shifts::assign_shift).route_layer(from_fn(require_role(&[
+                UserRole::HospitalAdmin,
+                UserRole::SuperAdmin,
+            ]))),
         )
         .route(
             "/api/v1/shifts/{shift_id}/cancel",
-            post(shifts::cancel_shift)
-                .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
+            post(shifts::cancel_shift).route_layer(from_fn(require_role(&[
+                UserRole::HospitalAdmin,
+                UserRole::SuperAdmin,
+            ]))),
         )
         .route(
             "/api/v1/shifts/{shift_id}/reschedule",
-            post(shifts::reschedule_shift)
-                .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
+            post(shifts::reschedule_shift).route_layer(from_fn(require_role(&[
+                UserRole::HospitalAdmin,
+                UserRole::SuperAdmin,
+            ]))),
         )
         // ---- Wallet — HospitalAdmin/SuperAdmin only.
         .route(
             "/api/v1/wallet",
-            get(wallet::get_wallet)
-                .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
+            get(wallet::get_wallet).route_layer(from_fn(require_role(&[
+                UserRole::HospitalAdmin,
+                UserRole::SuperAdmin,
+            ]))),
         )
         .route(
             "/api/v1/wallet/ledger",
-            get(wallet::get_ledger)
-                .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
+            get(wallet::get_ledger).route_layer(from_fn(require_role(&[
+                UserRole::HospitalAdmin,
+                UserRole::SuperAdmin,
+            ]))),
         )
         .route(
             "/api/v1/wallet/deposits",
             post(wallet::create_deposit)
                 .get(wallet::list_deposits)
+                .route_layer(from_fn(require_role(&[
+                    UserRole::HospitalAdmin,
+                    UserRole::SuperAdmin,
+                ]))),
+        )
+        .route(
+            "/api/v1/wallet/sub-account/initiate",
+            post(wallet::initiate_sub_account)
+                .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
+        )
+        .route(
+            "/api/v1/wallet/sub-account/provision",
+            post(wallet::provision_sub_account)
                 .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
         )
         .route(
             "/api/v1/wallet/payouts",
-            get(wallet::list_payouts)
-                .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
+            get(wallet::list_payouts).route_layer(from_fn(require_role(&[
+                UserRole::HospitalAdmin,
+                UserRole::SuperAdmin,
+            ]))),
         )
         .route(
             "/api/v1/wallet/payouts/{payout_id}/status",
-            get(wallet::get_payout_status)
-                .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
+            get(wallet::get_payout_status).route_layer(from_fn(require_role(&[
+                UserRole::HospitalAdmin,
+                UserRole::SuperAdmin,
+            ]))),
         )
         .route(
             "/api/v1/wallet/statement",
-            get(wallet::get_statement)
-                .route_layer(from_fn(require_role(&[UserRole::HospitalAdmin, UserRole::SuperAdmin]))),
+            get(wallet::get_statement).route_layer(from_fn(require_role(&[
+                UserRole::HospitalAdmin,
+                UserRole::SuperAdmin,
+            ]))),
         )
         .route(
             "/api/v1/admin/payouts/{shift_id}/retry",
-            post(wallet::retry_payout)
-                .route_layer(from_fn(require_role(&[UserRole::SuperAdmin]))),
+            post(wallet::retry_payout).route_layer(from_fn(require_role(&[UserRole::SuperAdmin]))),
         )
         // ---- Webhooks — authenticated by HMAC signature, not JWT.
         .route(

@@ -1,9 +1,9 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use utoipa::ToSchema;
 use uuid::Uuid;
 use validator::Validate;
-use utoipa::ToSchema;
 
 use super::registration::{ActorType, AuditEventType, RegistrationStatus};
 use crate::utils::validation::{validate_email_rfc5322, validate_phone_e164};
@@ -15,25 +15,25 @@ use crate::utils::validation::{validate_email_rfc5322, validate_phone_e164};
 pub struct Address {
     #[validate(length(min = 5, max = 255))]
     pub line1: String,
-    
+
     #[validate(length(max = 255))]
     pub line2: Option<String>,
-    
+
     #[validate(length(min = 2, max = 100))]
     pub city: String,
-    
+
     #[validate(length(min = 2, max = 100))]
     pub state: String,
-    
+
     #[validate(length(min = 3, max = 20))]
     pub postal_code: String,
-    
+
     #[validate(length(min = 2, max = 100))]
     pub country: String,
 }
 
 /// Geographic coordinates
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Coordinates {
     pub latitude: f64,
     pub longitude: f64,
@@ -52,24 +52,24 @@ pub enum PaymentMethodType {
 #[derive(Debug, Clone, Serialize, Deserialize, Validate, ToSchema)]
 pub struct PaymentDetails {
     pub method_type: PaymentMethodType,
-    
+
     // For card payments
     #[validate(length(min = 13, max = 19))]
     pub card_number: Option<String>,
-    
+
     #[validate(range(min = 1, max = 12))]
     pub expiry_month: Option<u8>,
-    
+
     #[validate(range(min = 2024, max = 2100))]
     pub expiry_year: Option<u16>,
-    
+
     #[validate(length(min = 3, max = 4))]
     pub cvv: Option<String>,
-    
+
     // For bank account payments
     #[validate(length(min = 10, max = 10))]
     pub account_number: Option<String>,
-    
+
     #[validate(length(min = 3, max = 10))]
     pub bank_code: Option<String>,
 }

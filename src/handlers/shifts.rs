@@ -3,25 +3,26 @@ use axum::{
     http::{HeaderMap, StatusCode},
     Json,
 };
+use utoipa::ToSchema;
 use uuid::Uuid;
 use validator::Validate;
-use utoipa::ToSchema;
 
 use crate::{
     models::shift::{
-        AcceptShiftRequest, ClockinApprovalDecisionRequest, ClockinApprovalRequest,
-        ClockinRequest, ClockinResponse, ClockoutResponse, CreateShiftRequest,
-        DeclineShiftRequest, EditRatingRequest, HandoverResponse,
-        HandoverRevisionRequest, MyApplicationEntry, NearbyShiftCard,
-        RankedInterestedClinician, RateHospitalRequest, RateWorkerRequest,
-        RatingResponse, Shift, ShiftApplication, ShiftApplicationRequest,
-        ShiftApplicationsQuery, ShiftAssignRequest, ShiftCancelRequest,
-        ShiftInterestRequest, ShiftListQuery, ShiftOfferRequest, ShiftOfferResponse,
-        ShiftRescheduleRequest, SubmitHandoverRequest,
+        AcceptShiftRequest, ClockinApprovalDecisionRequest, ClockinApprovalRequest, ClockinRequest,
+        ClockinResponse, ClockoutResponse, CreateShiftRequest, DeclineShiftRequest,
+        EditRatingRequest, HandoverResponse, HandoverRevisionRequest, MyApplicationEntry,
+        NearbyShiftCard, RankedInterestedClinician, RateHospitalRequest, RateWorkerRequest,
+        RatingResponse, Shift, ShiftApplication, ShiftApplicationRequest, ShiftApplicationsQuery,
+        ShiftAssignRequest, ShiftCancelRequest, ShiftInterestRequest, ShiftListQuery,
+        ShiftOfferRequest, ShiftOfferResponse, ShiftRescheduleRequest, SubmitHandoverRequest,
     },
     routes::AppState,
     services::shift_service::{self, ShiftServiceError},
-    utils::{errors::{AppError, AppResult}, extract_claims},
+    utils::{
+        errors::{AppError, AppResult},
+        extract_claims,
+    },
 };
 
 /// Response for shift preview
@@ -103,17 +104,26 @@ pub async fn create_shift(
     headers: HeaderMap,
     Json(payload): Json<CreateShiftRequest>,
 ) -> AppResult<(StatusCode, Json<Shift>)> {
-    payload.validate(). map_err(|e| AppError::Validation(e.to_string()))?;
+    payload
+        .validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
 
     let claims = extract_claims(&headers)?;
     let created_by = Uuid::parse_str(&claims.sub)
         .map_err(|_| AppError::Unauthorized("Invalid user ID in token".to_string()))?;
-    let hospital_id = claims.hospital_id
+    let hospital_id = claims
+        .hospital_id
         .as_deref()
         .and_then(|s| Uuid::parse_str(s).ok())
-        .ok_or_else(|| AppError::Forbidden("No hospital associated with this account".to_string()))?;
+        .ok_or_else(|| {
+            AppError::Forbidden("No hospital associated with this account".to_string())
+        })?;
 
-    match state.shift_service.create_shift(hospital_id, created_by, payload).await {
+    match state
+        .shift_service
+        .create_shift(hospital_id, created_by, payload)
+        .await
+    {
         Ok(shift) => Ok((StatusCode::CREATED, Json(shift))),
         Err(e) => Err(map_shift_error(e)),
     }
@@ -182,7 +192,9 @@ pub async fn preview_shift(
     State(state): State<AppState>,
     Json(payload): Json<CreateShiftRequest>,
 ) -> AppResult<Json<ShiftPreviewResponse>> {
-    payload.validate(). map_err(|e| AppError::Validation(e.to_string()))?;
+    payload
+        .validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
 
     match state.shift_service.preview_shift(&payload).await {
         Ok(preview) => Ok(Json(preview.into())),
@@ -239,7 +251,9 @@ pub async fn express_interest(
     Path(shift_id): Path<Uuid>,
     Json(payload): Json<ShiftInterestRequest>,
 ) -> AppResult<StatusCode> {
-    payload.validate(). map_err(|e| AppError::Validation(e.to_string()))?;
+    payload
+        .validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
 
     state
         .shift_service
@@ -273,7 +287,9 @@ pub async fn apply_for_shift(
     Path(shift_id): Path<Uuid>,
     Json(payload): Json<ShiftApplicationRequest>,
 ) -> AppResult<StatusCode> {
-    payload.validate(). map_err(|e| AppError::Validation(e.to_string()))?;
+    payload
+        .validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
 
     state
         .shift_service
@@ -1121,7 +1137,9 @@ pub async fn assign_shift(
     Path(shift_id): Path<Uuid>,
     Json(payload): Json<ShiftAssignRequest>,
 ) -> AppResult<StatusCode> {
-    payload.validate(). map_err(|e| AppError::Validation(e.to_string()))?;
+    payload
+        .validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
 
     state
         .shift_service
@@ -1154,7 +1172,9 @@ pub async fn cancel_shift(
     Path(shift_id): Path<Uuid>,
     Json(payload): Json<ShiftCancelRequest>,
 ) -> AppResult<StatusCode> {
-    payload.validate(). map_err(|e| AppError::Validation(e.to_string()))?;
+    payload
+        .validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
 
     state
         .shift_service
@@ -1187,7 +1207,9 @@ pub async fn reschedule_shift(
     Path(shift_id): Path<Uuid>,
     Json(payload): Json<ShiftRescheduleRequest>,
 ) -> AppResult<StatusCode> {
-    payload.validate(). map_err(|e| AppError::Validation(e.to_string()))?;
+    payload
+        .validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
 
     state
         .shift_service
