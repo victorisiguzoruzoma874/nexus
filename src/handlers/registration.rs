@@ -1,6 +1,6 @@
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     Json,
 };
 use serde::{Deserialize, Serialize};
@@ -8,10 +8,12 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::models::admin_registration::HospitalRegistrationRequest;
+use crate::models::user::Claims;
 use crate::routes::AppState;
 use crate::services::registration_service::{
     HospitalListResponse, RegistrationError, RegistrationStatusResponse,
 };
+use crate::utils::extract_claims;
 
 /// Response for hospital registration
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -155,6 +157,12 @@ pub async fn get_registration_status(
     }
 }
 
+/// Parse the acting admin's user id from JWT claims. Returns `None` when the
+/// subject is not a valid UUID, which the audit log treats as "unknown actor".
+pub(crate) fn admin_id_from_claims(claims: &Claims) -> Option<Uuid> {
+    Uuid::parse_str(&claims.sub).ok()
+}
+
 /// Approve hospital registration
 #[utoipa::path(
     post,
@@ -175,10 +183,20 @@ pub async fn get_registration_status(
 )]
 pub async fn approve_hospital(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(hospital_id): Path<Uuid>,
     Json(request): Json<ApprovalRequest>,
 ) -> Result<Json<StatusChangeResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let admin_id = None;
+    let claims = extract_claims(&headers).map_err(|_| {
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse {
+                code: "UNAUTHORIZED".to_string(),
+                message: "Missing or invalid token".to_string(),
+            }),
+        )
+    })?;
+    let admin_id = admin_id_from_claims(&claims);
 
     match state
         .registration_service
@@ -234,10 +252,20 @@ pub async fn approve_hospital(
 )]
 pub async fn reject_hospital(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(hospital_id): Path<Uuid>,
     Json(request): Json<RejectionRequest>,
 ) -> Result<Json<StatusChangeResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let admin_id = None;
+    let claims = extract_claims(&headers).map_err(|_| {
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse {
+                code: "UNAUTHORIZED".to_string(),
+                message: "Missing or invalid token".to_string(),
+            }),
+        )
+    })?;
+    let admin_id = admin_id_from_claims(&claims);
 
     match state
         .registration_service
@@ -333,4 +361,37 @@ pub struct ListHospitalsQuery {
     pub status: Option<String>,
     pub page: Option<i64>,
     pub page_size: Option<i64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::user::{Claims, UserRole};
+
+    fn claims_with_sub(sub: &str) -> Claims {
+        Claims {
+            sub: sub.to_string(),
+            email: "a@b.test".to_string(),
+            role: UserRole::SuperAdmin,
+            hospital_id: None,
+            exp: 0,
+            iat: 0,
+        }
+    }
+
+    #[test]
+    fn admin_id_parses_valid_uuid_subject() {
+        let id = "11111111-1111-1111-1111-111111111111";
+        let claims = claims_with_sub(id);
+        assert_eq!(
+            admin_id_from_claims(&claims),
+            Some(Uuid::parse_str(id).unwrap())
+        );
+    }
+
+    #[test]
+    fn admin_id_is_none_for_non_uuid_subject() {
+        let claims = claims_with_sub("not-a-uuid");
+        assert_eq!(admin_id_from_claims(&claims), None);
+    }
 }

@@ -31,10 +31,13 @@ impl AppConfig {
         Ok(Self {
             server: ServerConfig {
                 host: env::var("SERVER_HOST").unwrap_or_else(|_| "0.0.0.0".to_string()),
-                port: env::var("SERVER_PORT")
+                // Prefer the platform-injected `PORT` (Render/Railway/Heroku),
+                // fall back to `SERVER_PORT`, then default to 8080 locally.
+                port: env::var("PORT")
+                    .or_else(|_| env::var("SERVER_PORT"))
                     .unwrap_or_else(|_| "8080".to_string())
                     .parse()
-                    .context("SERVER_PORT must be a valid port number")?,
+                    .context("PORT/SERVER_PORT must be a valid port number")?,
             },
             database: DatabaseConfig {
                 url: env::var("DATABASE_URL").context("DATABASE_URL must be set")?,
