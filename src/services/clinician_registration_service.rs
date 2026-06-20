@@ -37,6 +37,8 @@ pub enum ClinicianRegistrationError {
     NotFound,
     #[error("BVN and NIN must both be verified before adding a bank account")]
     IdentityNotVerified,
+    #[error("Server configuration error: {0}")]
+    Configuration(String),
 }
 
 pub struct ClinicianRegistrationService {
@@ -129,7 +131,7 @@ impl ClinicianRegistrationService {
         let clinician_id = self.repo.create_clinician(&mut tx, email).await?;
         tx.commit(). await?;
 
-        let token = issue_jwt(clinician_id);
+        let token = issue_jwt(clinician_id)?;
 
         let content = email_templates::clinician_welcome(None);
         self.email_outbox.enqueue_email(email, &content).await?;
@@ -246,7 +248,12 @@ fn mask_account(account: &str) -> String {
 }
 
 /// Minimal JWT issuance — reuses the same secret as the rest of the app.
-fn issue_jwt(clinician_id: Uuid) -> String {
+///
+/// Fails closed: never falls back to a hardcoded or empty signing key. An
+/// unset/empty `JWT_SECRET` must not yield a forgeable token. (The server
+/// refuses to boot without `JWT_SECRET` via `AppConfig::from_env`, so this is
+/// defense in depth.)
+fn issue_jwt(clinician_id: Uuid) -> Result<String, ClinicianRegistrationError> {
     use chrono::Utc;
     use jsonwebtoken::{encode, EncodingKey, Header};
     use serde::{Deserialize, Serialize};
@@ -259,18 +266,27 @@ fn issue_jwt(clinician_id: Uuid) -> String {
         iat: usize,
     }
 
-    let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "dev_secret".to_string());
+    let secret = std::env::var("JWT_SECRET").unwrap_or_default();
+    if secret.trim().is_empty() {
+        return Err(ClinicianRegistrationError::Configuration(
+            "JWT_SECRET must be set".to_string(),
+        ));
+    }
+
     let now = Utc::now().timestamp() as usize;
     let claims = Claims {
-        sub: clinician_id.to_string(), role: "staff".to_string(), exp: now + 86400,
+        sub: clinician_id.to_string(),
+        role: "staff".to_string(),
+        exp: now + 86400,
         iat: now,
     };
 
     encode(
-        &Header::default(), &claims,
+        &Header::default(),
+        &claims,
         &EncodingKey::from_secret(secret.as_bytes()),
     )
-    .unwrap_or_else(|_| "token_error".to_string())
+    .map_err(|e| ClinicianRegistrationError::Configuration(format!("token signing failed: {e}")))
 }
 
 // Extend ClinicianRepository with a reverse lookup helper is in repositories/clinician.rs

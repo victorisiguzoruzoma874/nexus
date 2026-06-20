@@ -340,7 +340,11 @@ fn sha256_hex(input: &str) -> String {
 }
 
 fn issue_access_token(user: &User) -> Result<(String, u64), String> {
-    let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_default();
+    let jwt_secret =
+        std::env::var("JWT_SECRET").map_err(|_| "JWT_SECRET must be set".to_string())?;
+    if jwt_secret.trim().is_empty() {
+        return Err("JWT_SECRET must not be empty".to_string());
+    }
     let expiry_hours: u64 = std::env::var("JWT_EXPIRY_HOURS")
         .ok()
         .and_then(|v| v.parse(). ok())
